@@ -1,0 +1,6 @@
+#!/bin/sh
+# Raccourci : lance preuves.py avec le Python de technocore-did-starter (qui a déjà `cryptography`).
+AGENT_DIR="${TECHNOCORE_AGENT_DIR:-$HOME/Desktop/claude/flop-did}"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PY="$DIR/.venv/bin/python"; [ -x "$PY" ] || PY="$AGENT_DIR/.venv/bin/python"
+exec "$PY" "$DIR/preuves.py" "$@"
