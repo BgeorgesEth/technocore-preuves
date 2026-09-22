@@ -1,0 +1,13 @@
+#!/bin/sh
+# Lance le tableau de bord avec le premier Python qui a `cryptography` :
+# .venv de ce dossier, puis celui de technocore-did-starter, puis python3.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT_DIR="${TECHNOCORE_AGENT_DIR:-$HOME/Desktop/claude/flop-did}"
+for PY in "$DIR/.venv/bin/python" "$AGENT_DIR/.venv/bin/python" "$(command -v python3)"; do
+  if [ -x "$PY" ] && "$PY" -c "import cryptography" 2>/dev/null; then
+    exec "$PY" "$DIR/tableau.py" "$@"
+  fi
+done
+echo "Python avec 'cryptography' introuvable. Installe-le :"
+echo "  cd \"$DIR\" && python3 -m venv .venv && .venv/bin/pip install cryptography"
+exit 1
