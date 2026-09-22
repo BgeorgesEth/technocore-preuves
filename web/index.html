@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preuves Technocore</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23145c4a'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f5f1; --surface: #ffffff; --surface-2: #efede7; --fg: #1b1b19; --muted: #6a6861;
+  --line: #e2dfd7; --accent: #145c4a; --accent-fg: #ffffff; --accent-soft: #e1efe9;
+  --ok: #1d7a4f; --ok-soft: #e3f3ea; --warn: #9a6400; --warn-soft: #fbf0d9;
+  --bad: #b3261e; --bad-soft: #fbe5e3; --info: #3a5a9b; --info-soft: #e6ecf7;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131412; --surface: #1c1d1a; --surface-2: #262724; --fg: #ecebe6; --muted: #9d9b93;
+    --line: #33342f; --accent: #5cc3a4; --accent-fg: #0d1a16; --accent-soft: #1d3a31;
+    --ok: #6fd39f; --ok-soft: #1b3326; --warn: #f0b85a; --warn-soft: #3a2e17;
+    --bad: #ff8a80; --bad-soft: #3d1f1d; --info: #9db8f0; --info-soft: #1f2a40;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+button, input, textarea, select { font: inherit; color: inherit; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px 64px; }
+
+header { display: flex; align-items: center; gap: 12px; padding: 18px 0 8px; flex-wrap: wrap; }
+.logo { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; flex: none; }
+.logo svg { width: 20px; height: 20px; }
+h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--muted); font-size: 13px; }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 5px 11px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--ok); box-shadow: 0 0 0 0 var(--ok); animation: pulse 2s infinite; }
+.dot.err { background: var(--bad); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.lang { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+
+nav { display: flex; gap: 4px; margin: 14px 0 18px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav button { background: none; border: 0; padding: 10px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; font-weight: 500; }
+nav button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+nav .count { font-size: 12px; background: var(--surface-2); border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+
+.search { position: relative; }
+.search svg { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--muted); }
+.search input { width: 100%; padding: 15px 16px 15px 48px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; box-shadow: var(--shadow); outline: none; }
+.search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.filters { display: flex; gap: 8px; margin: 12px 0 16px; flex-wrap: wrap; align-items: center; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+select.chip { padding-right: 8px; max-width: 220px; }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.stat span { color: var(--muted); font-size: 12.5px; }
+
+.results { display: grid; gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+.card-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.type { font-weight: 600; color: var(--fg); }
+.card-text { margin: 8px 0 10px; white-space: pre-wrap; word-break: break-word; }
+.card-text a { color: var(--accent); }
+.meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.badge { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.badge.info { background: var(--info-soft); color: var(--info); }
+.did { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border-radius: 6px; padding: 2px 7px; cursor: pointer; border: 0; }
+.actions { display: flex; gap: 6px; margin-left: auto; }
+.btn { color: var(--fg); border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 6px 12px; font-size: 13px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.small { padding: 3px 9px; font-size: 12px; }
+.btn[disabled] { opacity: .5; cursor: default; }
+
+.empty { text-align: center; padding: 48px 16px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 14px; }
+.empty b { color: var(--fg); display: block; margin-bottom: 4px; font-size: 16px; }
+.empty .btn { margin-top: 14px; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.panel h2 { font-size: 15px; margin: 0 0 4px; }
+.panel p.hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; min-width: 0; }
+input.field, textarea.field, select.field { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 9px 12px; outline: none; }
+input.field:focus, textarea.field:focus, select.field:focus { border-color: var(--accent); }
+textarea.field { min-height: 140px; font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+.list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.list li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--bg); border-radius: 10px; }
+.list li .grow { flex: 1; min-width: 0; }
+.list li code { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.x { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 4px; }
+.x:hover { color: var(--bad); }
+.room-name { font-weight: 600; }
+.room-meta { font-size: 12.5px; color: var(--muted); }
+.drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 12px; text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); }
+.cmd { position: relative; background: var(--surface-2); border-radius: 10px; padding: 12px 12px 12px 14px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-all; margin-top: 10px; }
+.cmd .btn { position: absolute; top: 8px; right: 8px; }
+.cmd code { display: block; padding-right: 72px; }
+.note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+.msg { margin-top: 10px; font-size: 13.5px; }
+.msg.ok { color: var(--ok); } .msg.bad { color: var(--bad); }
+.field-label { font-size: 13px; font-weight: 500; margin: 12px 0 6px; display: block; }
+.events { margin-top: 16px; }
+.hidden { display: none !important; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 13.5px; opacity: 0; transition: .2s; pointer-events: none; }
+.toast.show { opacity: 1; transform: translateX(-50%); }
+footer { margin-top: 36px; color: var(--muted); font-size: 12.5px; text-align: center; }
+footer code { font-family: var(--mono); }
+
+@media (max-width: 760px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .grid2 { grid-template-columns: 1fr; }
+  .actions { margin-left: 0; width: 100%; }
+  .pill.status { order: 3; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+    <div>
+      <h1 data-t="titre">Preuves Technocore</h1>
+      <div class="sub" data-t="soustitre">Retrouve et prouve tout ce que tes DID ont publié</div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">…</span></span>
+    <button class="lang" id="lang" aria-label="Language">EN</button>
+  </header>
+
+  <nav role="tablist">
+    <button role="tab" data-tab="preuves" aria-selected="true"><span data-t="tab_preuves">Preuves</span><span class="count" id="count-all">0</span></button>
+    <button role="tab" data-tab="surveillance" aria-selected="false" data-t="tab_surveillance">Surveillance</button>
+    <button role="tab" data-tab="ajouter" aria-selected="false" data-t="tab_ajouter">Ajouter</button>
+    <button role="tab" data-tab="exporter" aria-selected="false" data-t="tab_exporter">Exporter</button>
+  </nav>
+
+  <!-- PREUVES -->
+  <section id="tab-preuves">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" autocomplete="off" spellcheck="false" data-tp="recherche" placeholder="Rechercher un DID, un mot, un salon, un commit…">
+    </div>
+    <div class="filters">
+      <button class="chip" data-type="" aria-pressed="true" data-t="f_tout">Tout</button>
+      <button class="chip" data-type="message" aria-pressed="false" data-t="f_messages">Messages</button>
+      <button class="chip" data-type="contribution" aria-pressed="false" data-t="f_contrib">Contributions</button>
+      <select class="chip" id="f-did"></select>
+      <select class="chip" id="f-salon"></select>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="s-total">0</b><span data-t="s_total">preuves</span></div>
+      <div class="stat"><b id="s-valides">0</b><span data-t="s_valides">signatures valides</span></div>
+      <div class="stat"><b id="s-bitcoin">0</b><span data-t="s_bitcoin">ancrées dans Bitcoin</span></div>
+      <div class="stat"><b id="s-attente">0</b><span data-t="s_attente">horodatages en attente</span></div>
+    </div>
+    <div class="results" id="results"></div>
+  </section>
+
+  <!-- SURVEILLANCE -->
+  <section id="tab-surveillance" class="hidden">
+    <div class="grid2">
+      <div class="panel">
+        <h2 data-t="mes_dids">Mes DID</h2>
+        <p class="hint" data-t="mes_dids_hint">Chaque message signé par l'un de ces DID dans un salon surveillé est capturé automatiquement.</p>
+        <div class="row">
+          <input class="field" id="add-did" placeholder="did:key:z6Mk…" spellcheck="false" autocomplete="off">
+          <button class="btn primary" id="add-did-btn" data-t="ajouter">Ajouter</button>
+        </div>
+        <div class="msg bad hidden" id="did-err"></div>
+        <ul class="list" id="did-list"></ul>
+      </div>
+      <div class="panel">
+        <h2 data-t="salons">Salons surveillés</h2>
+        <p class="hint" data-t="salons_hint">Au démarrage, l'historique encore conservé par le serveur est parcouru, puis le salon est suivi en continu.</p>
+        <div class="row">
+          <input class="field" id="add-room" placeholder="technocore" list="public-rooms" spellcheck="false" autocomplete="off">
+          <button class="btn primary" id="add-room-btn" data-t="ajouter">Ajouter</button>
+        </div>
+        <datalist id="public-rooms"></datalist>
+        <div class="msg bad hidden" id="room-err"></div>
+        <ul class="list" id="room-list"></ul>
+      </div>
+    </div>
+    <div class="panel events">
+      <h2 data-t="dernieres">Dernières captures</h2>
+      <p class="hint" data-t="dernieres_hint">Laisse la fenêtre Terminal du tableau de bord ouverte : la surveillance s'arrête quand elle est fermée.</p>
+      <ul class="list" id="event-list"></ul>
+    </div>
+  </section>
+
+  <!-- AJOUTER -->
+  <section id="tab-ajouter" class="hidden">
+    <div class="grid2">
+      <div class="panel">
+        <h2 data-t="importer">Importer des preuves</h2>
+        <p class="hint" data-t="importer_hint">Colle la sortie d'une commande (say, proof…) ou dépose des fichiers .json. Le texte autour n'est pas gênant.</p>
+        <div class="drop" id="drop" data-t="deposer">Dépose des fichiers ici</div>
+        <textarea class="field" id="import-text" spellcheck="false" placeholder='{ "room": "lobby", "posted": { … } }'></textarea>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="import-btn" data-t="importer_btn">Vérifier et archiver</button></div>
+        <div class="msg" id="import-msg"></div>
+      </div>
+      <div class="panel">
+        <h2 data-t="publier">Publier un message signé</h2>
+        <p class="hint" data-t="publier_hint">Ta clé ne quitte jamais le Terminal : copie cette commande, lance-la, tape ta passphrase. Si le salon est surveillé, le message apparaîtra ici tout seul.</p>
+        <label class="field-label" for="pub-room" data-t="salon">Salon</label>
+        <input class="field" id="pub-room" value="technocore" list="public-rooms" spellcheck="false">
+        <label class="field-label" for="pub-text" data-t="message">Message</label>
+        <textarea class="field" id="pub-text" style="min-height:90px;font-family:inherit;font-size:14px" data-tp="pub_ph" placeholder="Ton message public…"></textarea>
+        <div class="cmd"><code id="pub-cmd"></code><button class="btn small" data-copy="pub-cmd" data-t="copier">Copier</button></div>
+        <div class="note" id="pub-note"></div>
+
+        <h2 style="margin-top:24px" data-t="contribution">Prouver une contribution Git</h2>
+        <label class="field-label" for="pr-url" data-t="depot">URL du dépôt public</label>
+        <input class="field" id="pr-url" placeholder="https://github.com/moi/mon-repo" spellcheck="false">
+        <label class="field-label" for="pr-commit" data-t="commit">Hash complet du commit</label>
+        <input class="field" id="pr-commit" placeholder="4da6023f9e3d3f2e3499e3cf64a5c7729ff918dd" spellcheck="false">
+        <div class="cmd"><code id="pr-cmd"></code><button class="btn small" data-copy="pr-cmd" data-t="copier">Copier</button></div>
+        <div class="note" data-t="proof_note">Puis copie la sortie et importe-la à gauche.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXPORTER -->
+  <section id="tab-exporter" class="hidden">
+    <div class="grid2">
+      <div class="panel">
+        <h2 data-t="telecharger">Télécharger</h2>
+        <p class="hint" data-t="telecharger_hint">Tout ce qui est exporté est public : DID, textes, signatures. Aucun secret.</p>
+        <div class="meta" style="gap:8px">
+          <a class="btn primary" href="/api/archive.zip" data-t="zip">Tout (.zip)</a>
+          <a class="btn" href="/api/rapport/preuves.html">HTML</a>
+          <a class="btn" href="/api/rapport/preuves.csv">CSV</a>
+          <a class="btn" href="/api/rapport/PREUVES.md">Markdown</a>
+          <a class="btn" href="/api/rapport/index.jsonl">JSONL</a>
+        </div>
+        <div class="note"><span data-t="dossier">Dossier de l'archive :</span> <code id="archive-path"></code></div>
+      </div>
+      <div class="panel">
+        <h2 data-t="horodatage">Horodatage Bitcoin</h2>
+        <p class="hint" data-t="horodatage_hint">OpenTimestamps ancre l'empreinte de chaque preuve dans Bitcoin : une date que ni toi ni le serveur ne pouvez modifier. Automatique, en quelques heures.</p>
+        <div class="meta" style="gap:8px">
+          <button class="btn" id="stamp-btn" data-t="horodater">Horodater maintenant</button>
+          <button class="btn" id="upgrade-btn" data-t="completer">Récupérer les ancrages</button>
+        </div>
+        <div class="msg" id="job-msg"></div>
+        <div class="note" data-t="verif_note">Pour vérifier sans cet outil : dépose un .json et son .ots sur opentimestamps.org.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer><span data-t="footer">Données publiques de technocore.chat. Messages = contenu non vérifié écrit par des tiers.</span></footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const JETON = "__JETON__";
+const $ = (id) => document.getElementById(id);
+
+const I18N = {
+  en: {
+    titre: "Technocore Proofs", soustitre: "Find and prove everything your DIDs have published",
+    tab_preuves: "Proofs", tab_surveillance: "Watching", tab_ajouter: "Add", tab_exporter: "Export",
+    recherche: "Search a DID, a word, a room, a commit…", f_tout: "All", f_messages: "Messages", f_contrib: "Contributions",
+    tous_did: "All DIDs", tous_salons: "All rooms",
+    s_total: "proofs", s_valides: "valid signatures", s_bitcoin: "anchored in Bitcoin", s_attente: "timestamps pending",
+    mes_dids: "My DIDs", mes_dids_hint: "Every message signed by one of these DIDs in a watched room is captured automatically.",
+    ajouter: "Add", salons: "Watched rooms", salons_hint: "On start, the history the server still keeps is scanned, then the room is followed live.",
+    dernieres: "Latest captures", dernieres_hint: "Keep the dashboard's Terminal window open: watching stops when it is closed.",
+    importer: "Import proofs", importer_hint: "Paste a command's output (say, proof…) or drop .json files. Surrounding text is fine.",
+    deposer: "Drop files here", importer_btn: "Verify and archive",
+    publier: "Publish a signed message", publier_hint: "Your key never leaves the Terminal: copy this command, run it, type your passphrase. If the room is watched, the message will show up here by itself.",
+    salon: "Room", message: "Message", pub_ph: "Your public message…", copier: "Copy",
+    contribution: "Prove a Git contribution", depot: "Public repository URL", commit: "Full commit hash",
+    proof_note: "Then copy the output and import it on the left.",
+    telecharger: "Download", telecharger_hint: "Everything exported is public: DIDs, texts, signatures. No secrets.",
+    zip: "Everything (.zip)", dossier: "Archive folder:", horodatage: "Bitcoin timestamp",
+    horodatage_hint: "OpenTimestamps anchors each proof's fingerprint in Bitcoin: a date neither you nor the server can change. Automatic, within a few hours.",
+    horodater: "Timestamp now", completer: "Fetch anchors",
+    verif_note: "To verify without this tool: drop a .json and its .ots on opentimestamps.org.",
+    footer: "Public data from technocore.chat. Messages are unverified content written by third parties.",
+    actif: "Watching · {n} room(s)", arrete: "Not watching", erreur_etat: "Connection lost",
+    aucun: "No proofs yet", aucun_hint: "Add your DID in Watching, or import an existing proof.",
+    rien: "No results", rien_hint: "Nothing in your archive matches this search.",
+    surveiller_did: "Watch this DID", did_surveille: "This DID is watched: its next messages will appear here.",
+    sig_ok: "✓ signature", sig_bad: "✗ invalid signature", serveur_confirme: "server confirmed", serveur_introuvable: "already gone from server",
+    serveur_non_verifie: "server not checked", serveur_different: "differs from server", serveur_erreur: "server check failed", ots_bitcoin: "⛓ anchored in Bitcoin", ots_en_attente: "⏳ timestamp pending", ots_absent: "not timestamped",
+    msg_type: "Message", contrib_type: "Contribution", copie: "Copied", retirer: "Remove",
+    etat_surveillance: "live", etat_rattrapage: "scanning history…", etat_demarrage: "starting…", etat_erreur: "error", etat_arret: "stopped",
+    releve: "checked {t}", captures: "{n} captured", manques: "{n} not read (room too fast)", hist_complet: "full history since {t}", hist_partiel: "partial history", hist_en_cours: "reading history…", hist_en_attente: "history queued",
+    aucune_capture: "No captures since the dashboard started.", aucun_did: "No DID yet.", aucun_salon: "No room yet.",
+    importe: "{a} added · {d} already archived · {i} invalid (rejected)", rien_importe: "No proof recognized in this text.",
+    job_lance: "Started in the background: results will show in the list.", did_invalide: "Invalid DID (expected did:key:z6Mk…)",
+    salon_invalide: "Invalid room name (a-z, 0-9, - and _)", pub_note_watched: "✓ Room watched: the message will be archived automatically.",
+    pub_note_unwatched: "⚠ This room isn't watched: add it in Watching, or import the output afterwards.",
+    agent_absent: "cd path/to/technocore-did-starter", il_y_a: "{n} ago", a_l_instant: "just now",
+  },
+};
+const FR = {
+  tous_did: "Tous les DID", tous_salons: "Tous les salons",
+  actif: "Surveillance · {n} salon(s)", arrete: "Surveillance arrêtée", erreur_etat: "Connexion perdue",
+  aucun: "Aucune preuve pour l'instant", aucun_hint: "Ajoute ton DID dans Surveillance, ou importe une preuve existante.",
+  rien: "Aucun résultat", rien_hint: "Rien dans ton archive ne correspond à cette recherche.",
+  surveiller_did: "Surveiller ce DID", did_surveille: "Ce DID est surveillé : ses prochains messages apparaîtront ici.",
+  sig_ok: "✓ signature", sig_bad: "✗ signature invalide", serveur_confirme: "confirmé par le serveur", serveur_introuvable: "déjà effacé du serveur",
+  serveur_non_verifie: "serveur non vérifié", serveur_different: "diffère du serveur", serveur_erreur: "vérification serveur échouée", ots_bitcoin: "⛓ ancré dans Bitcoin", ots_en_attente: "⏳ horodatage en attente", ots_absent: "non horodaté",
+  msg_type: "Message", contrib_type: "Contribution", copie: "Copié", retirer: "Retirer",
+  etat_surveillance: "en direct", etat_rattrapage: "lecture de l'historique…", etat_demarrage: "démarrage…", etat_erreur: "erreur", etat_arret: "arrêté",
+  releve: "relevé {t}", captures: "{n} capturé(s)", manques: "{n} non lu(s) (salon trop rapide)", hist_complet: "historique complet depuis {t}", hist_partiel: "historique partiel", hist_en_cours: "lecture de l'historique…", hist_en_attente: "historique en file d'attente",
+  aucune_capture: "Aucune capture depuis le lancement du tableau de bord.", aucun_did: "Aucun DID pour l'instant.", aucun_salon: "Aucun salon pour l'instant.",
+  importe: "{a} ajoutée(s) · {d} déjà archivée(s) · {i} invalide(s) (refusée)", rien_importe: "Aucune preuve reconnue dans ce texte.",
+  job_lance: "Lancé en arrière-plan : le résultat apparaîtra dans la liste.", did_invalide: "DID invalide (attendu : did:key:z6Mk…)",
+  salon_invalide: "Nom de salon invalide (a-z, 0-9, - et _)", pub_note_watched: "✓ Salon surveillé : le message sera archivé automatiquement.",
+  pub_note_unwatched: "⚠ Ce salon n'est pas surveillé : ajoute-le dans Surveillance, ou importe la sortie ensuite.",
+  agent_absent: "cd chemin/vers/technocore-did-starter", il_y_a: "il y a {n}", a_l_instant: "à l'instant",
+};
+let lang = "fr";
+try { lang = localStorage.getItem("tc-lang") || (navigator.language.startsWith("fr") ? "fr" : "en"); } catch (e) {}
+const originals = {};
+function t(key, vars) {
+  let s = (lang === "en" ? I18N.en[key] : (FR[key] || originals[key])) || I18N.en[key] || key;
+  for (const [k, v] of Object.entries(vars || {})) s = s.replace("{" + k + "}", v);
+  return s;
+}
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach((el) => {
+    const k = el.dataset.t;
+    if (!(k in originals)) originals[k] = el.textContent;
+    el.textContent = lang === "en" ? (I18N.en[k] || originals[k]) : originals[k];
+  });
+  document.querySelectorAll("[data-tp]").forEach((el) => {
+    const k = el.dataset.tp;
+    if (!(k in originals)) originals[k] = el.placeholder;
+    el.placeholder = lang === "en" ? (I18N.en[k] || originals[k]) : originals[k];
+  });
+  $("lang").textContent = lang === "en" ? "FR" : "EN";
+  renderAll();
+}
+
+// ---------------------------------------------------------------- état
+let state = null, rows = [], version = -1, filterType = "", online = true;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Jeton": JETON }, body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.erreur || res.status), { data });
+  return data;
+}
+
+async function refresh() {
+  try {
+    state = await api("/api/etat");
+    online = true;
+    if (state.version !== version) {
+      rows = await api("/api/preuves");
+      version = state.version;
+      renderResults();
+    }
+    renderStatus(); renderWatch();
+  } catch (e) {
+    online = false; renderStatus();
+  }
+}
+
+// ---------------------------------------------------------------- rendu
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+const shortDid = (d) => d ? d.slice(8, 14) + "…" + d.slice(-4) : "";
+function fmtDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso || "";
+  return d.toLocaleString(lang === "en" ? "en-GB" : "fr-FR", { dateStyle: "medium", timeStyle: "short" });
+}
+function ago(iso) {
+  if (!iso) return "—";
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 10) return t("a_l_instant");
+  const n = s < 60 ? Math.round(s) + " s" : s < 3600 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h";
+  return t("il_y_a", { n });
+}
+function toast(text) {
+  const tt = $("toast"); tt.textContent = text; tt.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => tt.classList.remove("show"), 1600);
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast(t("copie")); } catch (e) {}
+}
+// Rend les URL cliquables sans jamais interpréter de HTML (le texte vient de tiers).
+function linkify(text) {
+  const frag = document.createDocumentFragment();
+  const re = /https:\/\/[^\s<>"']+/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    frag.append(text.slice(last, m.index));
+    frag.append(el("a", { href: m[0], target: "_blank", rel: "noopener noreferrer nofollow", text: m[0] }));
+    last = m.index + m[0].length;
+  }
+  frag.append(text.slice(last));
+  return frag;
+}
+
+function renderStatus() {
+  const dot = $("status-dot"), txt = $("status-text");
+  if (!online) { dot.className = "dot err"; txt.textContent = t("erreur_etat"); return; }
+  if (!state) return;
+  const live = state.salons.filter((s) => s.etat === "surveillance" || s.etat === "rattrapage").length;
+  const err = state.salons.some((s) => s.etat === "erreur");
+  dot.className = "dot " + (err ? "err" : live ? "live" : "");
+  txt.textContent = live ? t("actif", { n: live }) : t("arrete");
+  $("archive-path").textContent = state.archive;
+}
+
+function filtered() {
+  const q = $("q").value.trim().toLowerCase();
+  const did = $("f-did").value, salon = $("f-salon").value;
+  return rows.filter((r) =>
+    (!filterType || r.type === filterType) && (!did || r.did === did) && (!salon || r.salon === salon) &&
+    (!q || [r.did, r.texte, r.salon, r.seq, r.commit, r.url, r.fichier].some((v) => v != null && String(v).toLowerCase().includes(q))));
+}
+
+function fillSelect(select, values, allLabel, fmt) {
+  const current = select.value;
+  select.replaceChildren(el("option", { value: "", text: allLabel }), ...values.map((v) => el("option", { value: v, text: fmt ? fmt(v) : v })));
+  select.value = values.includes(current) ? current : "";
+}
+
+function renderResults() {
+  fillSelect($("f-did"), [...new Set(rows.map((r) => r.did))], t("tous_did"), shortDid);
+  fillSelect($("f-salon"), [...new Set(rows.filter((r) => r.salon).map((r) => r.salon))], t("tous_salons"), (s) => "#" + s);
+  $("count-all").textContent = rows.length;
+  $("s-total").textContent = rows.length;
+  $("s-valides").textContent = rows.filter((r) => r.signature_valide).length;
+  $("s-bitcoin").textContent = rows.filter((r) => r.horodatage === "bitcoin").length;
+  $("s-attente").textContent = rows.filter((r) => r.horodatage === "en_attente").length;
+
+  const list = filtered(), box = $("results");
+  if (!list.length) {
+    const q = $("q").value.trim();
+    const isDid = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$/.test(q);
+    const watched = state && state.dids.includes(q);
+    box.replaceChildren(el("div", { class: "empty" },
+      el("b", { text: rows.length ? t("rien") : t("aucun") }),
+      el("span", { text: isDid && watched ? t("did_surveille") : rows.length ? t("rien_hint") : t("aucun_hint") }),
+      isDid && !watched ? el("div", {}, el("button", { class: "btn primary", text: t("surveiller_did"), onclick: () => addDid(q) })) : null));
+    return;
+  }
+  box.replaceChildren(...list.map(card));
+}
+
+function card(r) {
+  const isMsg = r.type === "message";
+  const where = isMsg ? `#${r.salon} · n° ${r.seq}` : (r.commit || "").slice(0, 10);
+  const sig = el("span", { class: "badge " + (r.signature_valide ? "ok" : "bad"), text: r.signature_valide ? t("sig_ok") : t("sig_bad") });
+  const serveur = isMsg ? el("span", { class: "badge " + (r.serveur === "confirme" ? "info" : ""), text: t("serveur_" + r.serveur) }) : null;
+  const ots = el("span", { class: "badge " + (r.horodatage === "bitcoin" ? "ok" : r.horodatage === "en_attente" ? "warn" : ""),
+                          text: t("ots_" + r.horodatage) || r.horodatage });
+  const dl = (name, label) => el("a", { class: "btn small", href: "/api/fichier?nom=" + encodeURIComponent(name), text: label });
+  return el("article", { class: "card" },
+    el("div", { class: "card-top" },
+      el("span", { class: "type", text: isMsg ? t("msg_type") : t("contrib_type") }),
+      el("span", { text: where }), el("span", { text: "·" }), el("span", { text: fmtDate(r.date) })),
+    el("div", { class: "card-text" }, linkify(r.texte || "")),
+    el("div", { class: "meta" },
+      el("button", { class: "did", title: r.did, text: shortDid(r.did), onclick: () => copy(r.did) }),
+      sig, serveur, ots,
+      el("div", { class: "actions" },
+        dl(r.fichier, "JSON"),
+        r.horodatage !== "absent" ? dl(r.fichier + ".ots", ".ots") : null)));
+}
+
+function renderWatch() {
+  if (!state) return;
+  const dl = $("did-list");
+  dl.replaceChildren(...(state.dids.length ? state.dids.map((d) => el("li", {},
+    el("div", { class: "grow" }, el("code", { text: d })),
+    el("button", { class: "x", title: t("retirer"), "aria-label": t("retirer"), text: "×", onclick: () => saveConfig(state.dids.filter((x) => x !== d), state.salons.map((s) => s.salon)) })))
+    : [el("li", {}, el("span", { class: "room-meta", text: t("aucun_did") }))]));
+
+  const rl = $("room-list");
+  rl.replaceChildren(...(state.salons.length ? state.salons.map((s) => {
+    const bits = [t("etat_" + s.etat) || s.etat];
+    if (s.dernier_releve) bits.push(t("releve", { t: ago(s.dernier_releve) }));
+    bits.push(t("captures", { n: s.captures || 0 }));
+    if (s.manques) bits.push(t("manques", { n: s.manques }));
+    if (s.historique === "complet" && s.depuis) bits.push(t("hist_complet", { t: fmtDate(s.depuis) }));
+    else if (s.historique === "partiel") bits.push(t("hist_partiel"));
+    else if (s.historique === "en_cours") bits.push(t("hist_en_cours"));
+    else if (s.historique === "en_attente") bits.push(t("hist_en_attente"));
+    return el("li", {},
+      el("span", { class: "dot " + (s.etat === "erreur" ? "err" : s.etat === "surveillance" ? "live" : ""), style: "margin-top:7px" }),
+      el("div", { class: "grow" },
+        el("div", { class: "room-name", text: "#" + s.salon }),
+        el("div", { class: "room-meta", text: bits.join(" · ") }),
+        s.erreur ? el("div", { class: "room-meta", style: "color:var(--bad)", text: s.erreur }) : null),
+      el("button", { class: "x", title: t("retirer"), "aria-label": t("retirer"), text: "×", onclick: () => saveConfig(state.dids, state.salons.map((x) => x.salon).filter((x) => x !== s.salon)) }));
+  }) : [el("li", {}, el("span", { class: "room-meta", text: t("aucun_salon") }))]));
+
+  const ev = $("event-list");
+  ev.replaceChildren(...(state.evenements.length ? state.evenements.map((e) => el("li", {},
+    el("div", { class: "grow" }, el("div", { text: `#${e.salon} · n° ${e.seq}` }), el("div", { class: "room-meta", text: `${e.source} · ${ago(e.quand)}` }))))
+    : [el("li", {}, el("span", { class: "room-meta", text: t("aucune_capture") }))]));
+  updatePublish();
+}
+
+function renderAll() { if (state) { renderStatus(); renderWatch(); } renderResults(); updatePublish(); updateProof(); }
+
+// ---------------------------------------------------------------- actions
+async function saveConfig(dids, salons, errBox) {
+  try {
+    state = await api("/api/config", { dids, salons });
+    renderWatch(); renderStatus(); renderResults();
+    return true;
+  } catch (e) {
+    if (errBox) { errBox.textContent = e.message; errBox.classList.remove("hidden"); }
+    return false;
+  }
+}
+async function addDid(value) {
+  const d = value.trim(), err = $("did-err");
+  err.classList.add("hidden");
+  if (!/^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$/.test(d)) { err.textContent = t("did_invalide"); err.classList.remove("hidden"); return; }
+  if (await saveConfig([...state.dids, d], state.salons.map((s) => s.salon), err)) $("add-did").value = "";
+}
+async function addRoom() {
+  const r = $("add-room").value.trim().replace(/^#/, "").toLowerCase(), err = $("room-err");
+  err.classList.add("hidden");
+  if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(r)) { err.textContent = t("salon_invalide"); err.classList.remove("hidden"); return; }
+  if (await saveConfig(state.dids, [...state.salons.map((s) => s.salon), r], err)) $("add-room").value = "";
+}
+
+const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+function agentCd() { return state && state.agent ? "cd " + shq(state.agent) : t("agent_absent"); }
+function updatePublish() {
+  const room = $("pub-room").value.trim() || "technocore";
+  const text = $("pub-text").value.replace(/\s+/g, " ").trim() || "…";
+  $("pub-cmd").textContent = `${agentCd()}\n.venv/bin/python technocore_agent.py say ${shq(room)} ${shq(text)} --timeout 60`;
+  const watched = state && state.salons.some((s) => s.salon === room);
+  $("pub-note").textContent = state ? (watched ? t("pub_note_watched") : t("pub_note_unwatched")) : "";
+}
+function updateProof() {
+  const url = $("pr-url").value.trim() || "https://github.com/…";
+  const commit = $("pr-commit").value.trim() || "…";
+  $("pr-cmd").textContent = `${agentCd()}\n.venv/bin/python technocore_agent.py proof ${shq(url)} ${shq(commit)}`;
+}
+
+async function doImport(text) {
+  const box = $("import-msg");
+  box.className = "msg";
+  try {
+    const r = await api("/api/importer", { texte: text });
+    const deja = r.trouvees - r.ajoutees - r.invalides;
+    box.className = "msg " + (r.ajoutees ? "ok" : r.invalides || !r.trouvees ? "bad" : "");
+    box.textContent = r.trouvees ? t("importe", { a: r.ajoutees, d: deja, i: r.invalides }) : t("rien_importe");
+    if (r.ajoutees) { $("import-text").value = ""; refresh(); }
+  } catch (e) { box.className = "msg bad"; box.textContent = e.message; }
+}
+
+// ---------------------------------------------------------------- événements
+document.querySelectorAll("nav [role=tab]").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav [role=tab]").forEach((x) => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll("section[id^=tab-]").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
+  if (b.dataset.tab === "surveillance" || b.dataset.tab === "ajouter") loadPublicRooms();
+}));
+document.querySelectorAll(".chip[data-type]").forEach((c) => c.addEventListener("click", () => {
+  filterType = c.dataset.type;
+  document.querySelectorAll(".chip[data-type]").forEach((x) => x.setAttribute("aria-pressed", x === c));
+  renderResults();
+}));
+$("q").addEventListener("input", renderResults);
+$("f-did").addEventListener("change", renderResults);
+$("f-salon").addEventListener("change", renderResults);
+$("add-did-btn").addEventListener("click", () => addDid($("add-did").value));
+$("add-did").addEventListener("keydown", (e) => e.key === "Enter" && addDid($("add-did").value));
+$("add-room-btn").addEventListener("click", addRoom);
+$("add-room").addEventListener("keydown", (e) => e.key === "Enter" && addRoom());
+["pub-room", "pub-text"].forEach((id) => $(id).addEventListener("input", updatePublish));
+["pr-url", "pr-commit"].forEach((id) => $(id).addEventListener("input", updateProof));
+document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copy($(b.dataset.copy).textContent)));
+$("import-btn").addEventListener("click", () => doImport($("import-text").value));
+$("stamp-btn").addEventListener("click", async () => { await api("/api/horodater", {}); $("job-msg").textContent = t("job_lance"); });
+$("upgrade-btn").addEventListener("click", async () => { await api("/api/completer", {}); $("job-msg").textContent = t("job_lance"); });
+$("lang").addEventListener("click", () => {
+  lang = lang === "en" ? "fr" : "en";
+  try { localStorage.setItem("tc-lang", lang); } catch (e) {}
+  applyLang();
+});
+const drop = $("drop");
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", async (e) => {
+  const texts = await Promise.all([...e.dataTransfer.files].map((f) => f.text()));
+  doImport(texts.join("\n"));
+});
+
+let roomsLoaded = false;
+async function loadPublicRooms() {
+  if (roomsLoaded) return;
+  try {
+    const rooms = await api("/api/salons-publics");
+    if (Array.isArray(rooms)) {
+      $("public-rooms").replaceChildren(...rooms.map((r) => el("option", { value: r.salon })));
+      roomsLoaded = true;
+    }
+  } catch (e) {}
+}
+
+applyLang();
+refresh();
+setInterval(refresh, 4000);
+setInterval(() => { if (state) renderWatch(); }, 15000);
+</script>
+</body>
+</html>

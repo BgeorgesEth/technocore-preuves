@@ -1,0 +1,509 @@
+"""Tableau de bord local des preuves Technocore.
+
+Lance un petit serveur web sur 127.0.0.1 (jamais exposé au réseau) et un surveillant qui suit
+les salons choisis : chaque message signé par un de tes DID est capturé, vérifié, archivé puis
+horodaté automatiquement. Aucune clé privée n'est manipulée ici.
+
+Usage : python tableau.py [--archive DOSSIER] [--port 8765] [--sans-navigateur]
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import re
+import secrets
+import sys
+import threading
+import time
+import webbrowser
+import zipfile
+from collections import deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
+
+import preuves as pv
+
+HERE = Path(__file__).resolve().parent
+AGENT_DIR = pv.DEFAULT_AGENT_DIR.expanduser()
+ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$")
+FILE_RE = re.compile(r"^(messages|contributions)/[A-Za-z0-9_.~-]+\.json(\.ots)?$")
+REPORTS = {"preuves.csv": "text/csv", "PREUVES.md": "text/markdown", "preuves.html": "text/html",
+           "index.jsonl": "application/x-ndjson"}
+DEFAULT_ROOMS = ["technocore", "lobby"]
+READS_PER_SECOND = 5  # le serveur autorise 600 lectures/min par IP : on en garde la moitié pour le reste
+EXPORT_TIME_LIMIT = 120
+MAINTENANCE_EVERY = 30
+STAMP_EVERY = 120
+UPGRADE_EVERY = 3600
+
+
+def log(message: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+class RateLimiter:
+    def __init__(self, per_second: float):
+        self.interval = 1.0 / per_second
+        self.next_slot = time.monotonic()
+        self.lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self.lock:
+            now = time.monotonic()
+            slot = max(now, self.next_slot)
+            self.next_slot = slot + self.interval
+        time.sleep(max(0.0, slot - now))
+
+
+class Config:
+    """DID et salons surveillés, stockés dans <archive>/config.json."""
+
+    def __init__(self, archive: pv.Archive):
+        self.path = archive.root / "config.json"
+        self.lock = threading.Lock()
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {"dids": archive.known_dids(), "salons": list(DEFAULT_ROOMS)}
+        self.dids = [d for d in data.get("dids", []) if DID_RE.match(d)]
+        self.salons = [r for r in data.get("salons", []) if ROOM_RE.match(r)]
+        self.save()
+
+    def save(self) -> None:
+        with self.lock:
+            self.path.write_text(json.dumps({"dids": self.dids, "salons": self.salons}, indent=2) + "\n",
+                                 encoding="utf-8")
+
+    def update(self, dids: list[str], salons: list[str]) -> list[str]:
+        bad = [d for d in dids if not DID_RE.match(d)] + [r for r in salons if not ROOM_RE.match(r)]
+        if bad:
+            return bad
+        with self.lock:
+            self.dids = list(dict.fromkeys(dids))
+            self.salons = list(dict.fromkeys(salons))
+        self.save()
+        return []
+
+
+class RoomWatcher(threading.Thread):
+    """Suit un salon : rattrape l'historique conservé (export) puis lit en continu (long-poll)."""
+
+    def __init__(self, room: str, tableau: "Tableau"):
+        super().__init__(name=f"salon-{room}", daemon=True)
+        self.room, self.tableau = room, tableau
+        self.stop_event = threading.Event()
+        self.backfill_event = threading.Event()
+        self.backfill_event.set()
+        self.cursor: int | None = None
+        self.status = {"salon": room, "etat": "demarrage", "curseur": None, "dernier_releve": None,
+                       "captures": 0, "manques": 0, "historique": "en_attente", "depuis": None, "erreur": None}
+
+    def run(self) -> None:
+        backoff = 5
+        while not self.stop_event.is_set():
+            try:
+                if self.cursor is None:
+                    # Le suivi en direct part de maintenant ; l'export couvre tout ce qui précède.
+                    self.tableau.limiter.acquire()
+                    self.cursor = int(pv.read_room(self.room, limit=1).get("last_seq") or 0)
+                    self.status.update(etat="surveillance", curseur=self.cursor)
+                if self.backfill_event.is_set():
+                    self.backfill_event.clear()
+                    threading.Thread(target=self.backfill, name=f"export-{self.room}", daemon=True).start()
+                self.poll()
+                backoff = 5
+            except HTTPError as error:
+                wait = backoff
+                if error.code == 429:
+                    wait = int(error.headers.get("Retry-After") or 30)
+                self.fail(f"HTTP {error.code}", wait)
+                backoff = min(backoff * 2, 120)
+            except (URLError, TimeoutError, OSError, ValueError, KeyError) as error:
+                self.fail(str(error) or type(error).__name__, backoff)
+                backoff = min(backoff * 2, 120)
+
+    def fail(self, detail: str, wait: float) -> None:
+        self.status.update(etat="erreur", erreur=f"{detail} (nouvel essai dans {wait:.0f} s)")
+        self.stop_event.wait(wait)
+
+    def backfill(self) -> None:
+        """Parcourt l'export du salon (tout ce que le serveur conserve encore) à la recherche de tes DID.
+
+        Tourne en parallèle du suivi en direct, un export à la fois : le serveur bride les exports
+        simultanés depuis une même adresse.
+        """
+        with self.tableau.export_lock:
+            dids = set(self.tableau.config.dids)
+            self.status.update(historique="en_cours")
+            self.tableau.limiter.acquire()
+            started, first, complete = time.monotonic(), None, False
+            request = Request(f"{pv.BASE_URL}/r/{self.room}/export", headers={"User-Agent": pv.USER_AGENT})
+            try:
+                with urlopen(request, timeout=30) as response:
+                    for raw in response:
+                        if self.stop_event.is_set() or time.monotonic() - started > EXPORT_TIME_LIMIT:
+                            break
+                        line = raw.decode("utf-8", errors="replace")
+                        if first is None:
+                            match = re.match(r'\{"seq":\d+,"ts":"([^"]+)"', line)
+                            first = match.group(1) if match else None
+                        if dids and any(did in line for did in dids):
+                            try:
+                                message = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            # Le DID peut aussi apparaître dans le texte d'un autre : seul l'auteur compte.
+                            if message.get("from") in dids and self.tableau.capture(self.room, message, "rattrapage"):
+                                self.status["captures"] += 1
+                    else:
+                        complete = True
+            except (HTTPError, URLError, TimeoutError, OSError) as error:
+                log(f"{self.room} : export interrompu ({error})")
+            self.status.update(historique="complet" if complete else "partiel", depuis=first)
+            log(f"{self.room} : historique {'complet' if complete else 'partiel'}"
+                f"{f' depuis {first}' if first else ''}")
+
+    def poll(self) -> None:
+        self.tableau.limiter.acquire()
+        url = f"{pv.BASE_URL}/r/{self.room}?since={self.cursor}&limit=200&wait=10&format=json"
+        page = json.loads(pv.http(url, timeout=25))
+        messages = page.get("messages", [])
+        if messages and messages[0]["seq"] > self.cursor + 1:
+            # Le serveur ne renvoie que les 200 plus récents : ce qui précède nous a échappé.
+            self.status["manques"] += messages[0]["seq"] - self.cursor - 1
+        dids = set(self.tableau.config.dids)
+        for message in messages:
+            if message.get("from") in dids:
+                if self.tableau.capture(self.room, message, "surveillance"):
+                    self.status["captures"] += 1
+        if messages:
+            self.cursor = max(self.cursor, messages[-1]["seq"])
+        self.status.update(etat="surveillance", curseur=self.cursor, dernier_releve=pv.now_iso(), erreur=None)
+        if page.get("wait_held") is False:
+            self.stop_event.wait(10)
+
+
+class Tableau:
+    def __init__(self, archive: pv.Archive):
+        self.archive = archive
+        self.config = Config(archive)
+        self.limiter = RateLimiter(READS_PER_SECOND)
+        self.watchers: dict[str, RoomWatcher] = {}
+        self.events: deque = deque(maxlen=50)
+        self.dirty = threading.Event()
+        self.dirty.set()
+        self.version = 0
+        self.jobs = {"horodatage": None, "completer": None}
+        self.rooms_cache: tuple[float, list] = (0.0, [])
+        self.export_lock = threading.Lock()
+
+    # -- surveillance
+
+    def sync_watchers(self, backfill: bool = False) -> None:
+        for room in list(self.watchers):
+            if room not in self.config.salons:
+                self.watchers.pop(room).stop_event.set()
+        for room in self.config.salons:
+            watcher = self.watchers.get(room)
+            if watcher is None:
+                watcher = self.watchers[room] = RoomWatcher(room, self)
+                watcher.start()
+            elif backfill:
+                watcher.backfill_event.set()
+
+    def capture(self, room: str, message: dict, source: str) -> bool:
+        record = pv.message_record({**message, "room": room}, room, source)
+        record["server_confirmation"] = {"checked_at": pv.now_iso(), "status": "confirme"}
+        if not record["signature_valide"]:
+            log(f"{room} #{message.get('seq')} : signature invalide, ignoré")
+            return False
+        path = self.archive.save(record)
+        if path is None:
+            return False
+        self.changed()
+        self.events.appendleft({"quand": pv.now_iso(), "fichier": str(path.relative_to(self.archive.root)),
+                                "salon": room, "seq": record["seq"], "source": source})
+        log(f"capturé : {room} #{record['seq']} ({source})")
+        return True
+
+    def changed(self) -> None:
+        self.version += 1
+        self.dirty.set()
+
+    # -- tâches de fond
+
+    def maintenance(self) -> None:
+        last_stamp, last_upgrade = 0.0, 0.0
+        while True:
+            if self.archive.reload():
+                self.changed()
+            if self.dirty.is_set():
+                self.dirty.clear()
+                try:
+                    pv.build_reports(self.archive)
+                except OSError as error:
+                    log(f"rapport non régénéré : {error}")
+            now = time.monotonic()
+            if now - last_stamp > STAMP_EVERY:
+                last_stamp = now
+                self.stamp_pending()
+            if now - last_upgrade > UPGRADE_EVERY:
+                last_upgrade = now
+                self.upgrade_pending()
+            time.sleep(MAINTENANCE_EVERY)
+
+    def stamp_pending(self) -> int:
+        done = 0
+        for path, _ in self.archive.records():
+            if not path.with_name(path.name + ".ots").exists():
+                try:
+                    pv.stamp(path)
+                    done += 1
+                except pv.PreuveError as error:
+                    log(f"horodatage reporté : {error}")
+                    break
+        if done:
+            log(f"{done} preuve(s) envoyée(s) à OpenTimestamps")
+            self.changed()
+        return done
+
+    def upgrade_pending(self) -> int:
+        done = 0
+        for path, _ in self.archive.records():
+            ots = path.with_name(path.name + ".ots")
+            if pv.ots_status(ots) == "en_attente":
+                try:
+                    done += pv.upgrade(ots)
+                except (pv.PreuveError, HTTPError) as error:
+                    log(f"{path.name} : {error}")
+        if done:
+            log(f"{done} horodatage(s) ancré(s) dans Bitcoin")
+            self.changed()
+        return done
+
+    def run_job(self, name: str, func) -> None:
+        if self.jobs[name] and self.jobs[name].is_alive():
+            return
+        self.jobs[name] = threading.Thread(target=func, daemon=True)
+        self.jobs[name].start()
+
+    # -- données pour l'interface
+
+    def rows(self) -> list[dict]:
+        rows = []
+        for path, record in self.archive.records():
+            rel = str(path.relative_to(self.archive.root))
+            ots = pv.ots_status(path.with_name(path.name + ".ots"))
+            base = {"fichier": rel, "horodatage": ots, "signature_valide": bool(record.get("signature_valide")),
+                    "source": record.get("source"), "capture": record.get("captured_at")}
+            if record["type"] == "message":
+                rows.append({**base, "type": "message", "date": record["ts"], "did": record["from"],
+                             "salon": record["room"], "seq": record["seq"], "texte": record["text"],
+                             "serveur": record.get("server_confirmation", {}).get("status", "non_verifie")})
+            else:
+                proof = record["proof"]
+                rows.append({**base, "type": "contribution", "date": record["captured_at"], "did": proof["did"],
+                             "url": proof["artifact_url"], "commit": proof["commit"], "texte": proof["artifact_url"]})
+        rows.sort(key=lambda r: r["date"], reverse=True)
+        return rows
+
+    def state(self) -> dict:
+        return {
+            "version": self.version,
+            "archive": str(self.archive.root),
+            "agent": str(AGENT_DIR) if (AGENT_DIR / "technocore_agent.py").exists() else None,
+            "dids": self.config.dids,
+            "salons": [self.watchers[r].status if r in self.watchers else {"salon": r, "etat": "arret"}
+                       for r in self.config.salons],
+            "evenements": list(self.events)[:20],
+            "taches": {k: bool(v and v.is_alive()) for k, v in self.jobs.items()},
+        }
+
+    def public_rooms(self) -> list[dict]:
+        cached_at, rooms = self.rooms_cache
+        if time.monotonic() - cached_at < 60:
+            return rooms
+        self.limiter.acquire()
+        data = json.loads(pv.http(f"{pv.BASE_URL}/rooms?format=json&limit=100", timeout=20))
+        items = data.get("rooms", data) if isinstance(data, dict) else data
+        rooms = [{"salon": r.get("room") or r.get("name"), "sujet": r.get("topic"), "dernier": r.get("last_seq")}
+                 for r in items if isinstance(r, dict) and (r.get("room") or r.get("name"))]
+        self.rooms_cache = (time.monotonic(), rooms)
+        return rooms
+
+    def zip_bytes(self) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive_zip:
+            for path in sorted(self.archive.root.rglob("*")):
+                if path.is_file() and not path.name.startswith("."):
+                    archive_zip.write(path, f"Technocore-preuves/{path.relative_to(self.archive.root)}")
+        return buffer.getvalue()
+
+
+def make_handler(tableau: Tableau, token: str, port: int):
+    allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    page = (HERE / "web" / "index.html").read_text(encoding="utf-8")
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "technocore-tableau"
+
+        def log_message(self, *args) -> None:  # silencieux : le terminal sert au journal des captures
+            pass
+
+        def send(self, status: int, body: bytes, content_type: str, extra: dict | None = None) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            for key, value in (extra or {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def json(self, data, status: int = 200) -> None:
+            self.send(status, json.dumps(data, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+
+        def guard(self) -> bool:
+            # Refuse les requêtes dont l'hôte n'est pas le nôtre (protection contre le DNS rebinding).
+            if self.headers.get("Host") not in allowed_hosts:
+                self.send(403, b"hote refuse", "text/plain")
+                return False
+            return True
+
+        def do_GET(self) -> None:
+            if not self.guard():
+                return
+            url = urlsplit(self.path)
+            query = parse_qs(url.query)
+            if url.path == "/":
+                html = page.replace("__JETON__", token)
+                self.send(200, html.encode(), "text/html; charset=utf-8", {
+                    "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                               "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                                               "frame-ancestors 'none'"})
+            elif url.path == "/api/etat":
+                self.json(tableau.state())
+            elif url.path == "/api/preuves":
+                self.json(tableau.rows())
+            elif url.path == "/api/salons-publics":
+                try:
+                    self.json(tableau.public_rooms())
+                except (HTTPError, URLError, TimeoutError, OSError, ValueError) as error:
+                    self.json({"erreur": str(error)}, 502)
+            elif url.path == "/api/fichier":
+                name = (query.get("nom") or [""])[0]
+                path = tableau.archive.root / name
+                if not FILE_RE.match(name) or not path.is_file():
+                    self.send(404, b"introuvable", "text/plain")
+                    return
+                content_type = "application/octet-stream" if name.endswith(".ots") else "application/json"
+                self.send(200, path.read_bytes(), content_type,
+                          {"Content-Disposition": f'attachment; filename="{path.name}"'})
+            elif url.path.startswith("/api/rapport/") and url.path.rsplit("/", 1)[-1] in REPORTS:
+                name = url.path.rsplit("/", 1)[-1]
+                pv.build_reports(tableau.archive)
+                self.send(200, (tableau.archive.root / name).read_bytes(), REPORTS[name] + "; charset=utf-8",
+                          {"Content-Disposition": f'attachment; filename="{name}"'})
+            elif url.path == "/api/archive.zip":
+                self.send(200, tableau.zip_bytes(), "application/zip",
+                          {"Content-Disposition": 'attachment; filename="Technocore-preuves.zip"'})
+            else:
+                self.send(404, b"introuvable", "text/plain")
+
+        def do_POST(self) -> None:
+            if not self.guard():
+                return
+            # Jeton exigé : un autre site ouvert dans le navigateur ne peut pas piloter le tableau de bord.
+            if not secrets.compare_digest(self.headers.get("X-Jeton", ""), token):
+                self.send(403, b"jeton invalide", "text/plain")
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 20 * 1024 * 1024:
+                self.send(413, b"trop gros", "text/plain")
+                return
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self.json({"erreur": "JSON invalide"}, 400)
+                return
+            path = urlsplit(self.path).path
+            if path == "/api/config":
+                old_dids = set(tableau.config.dids)
+                bad = tableau.config.update(body.get("dids", []), body.get("salons", []))
+                if bad:
+                    self.json({"erreur": "valeurs invalides", "details": bad}, 400)
+                    return
+                tableau.sync_watchers(backfill=bool(set(tableau.config.dids) - old_dids))
+                self.json(tableau.state())
+            elif path == "/api/importer":
+                text = body.get("texte", "")
+                records = [r for obj in pv.extract_json_objects(text)
+                           for r in pv.records_from_object(obj, "import")]
+                added, invalid = 0, 0
+                for record in records:
+                    if not pv.verify_record(record):
+                        invalid += 1
+                        continue
+                    if tableau.archive.save(record):
+                        added += 1
+                if added:
+                    tableau.changed()
+                    tableau.run_job("horodatage", tableau.stamp_pending)
+                self.json({"trouvees": len(records), "ajoutees": added, "invalides": invalid})
+            elif path == "/api/horodater":
+                tableau.run_job("horodatage", tableau.stamp_pending)
+                self.json({"ok": True})
+            elif path == "/api/completer":
+                tableau.run_job("completer", tableau.upgrade_pending)
+                self.json({"ok": True})
+            else:
+                self.send(404, b"introuvable", "text/plain")
+
+    return Handler
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Tableau de bord local des preuves Technocore")
+    parser.add_argument("--archive", type=Path, default=pv.DEFAULT_ARCHIVE)
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--sans-navigateur", action="store_true")
+    args = parser.parse_args(argv)
+
+    tableau = Tableau(pv.Archive(args.archive))
+    server = None
+    for port in range(args.port, args.port + 20):
+        try:
+            token = secrets.token_urlsafe(24)
+            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(tableau, token, port))
+            break
+        except OSError:
+            continue
+    if server is None:
+        print("Aucun port libre entre", args.port, "et", args.port + 19, file=sys.stderr)
+        return 1
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}/"
+
+    tableau.sync_watchers()
+    threading.Thread(target=tableau.maintenance, name="maintenance", daemon=True).start()
+    log(f"Tableau de bord : {url}")
+    log(f"Archive : {tableau.archive.root}")
+    log(f"DID surveillés : {len(tableau.config.dids)} · salons : {', '.join(tableau.config.salons) or 'aucun'}")
+    log("Laisse cette fenêtre ouverte pour continuer la surveillance. Ctrl+C pour arrêter.")
+    if not args.sans_navigateur:
+        threading.Timer(0.8, webbrowser.open, (url,)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log("Arrêt.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

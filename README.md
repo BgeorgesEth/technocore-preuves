@@ -1,0 +1,137 @@
+# Technocore Preuves / Technocore Proofs
+
+**🇫🇷 Retrouve, prouve et archive automatiquement tout ce que ton DID publie sur
+[Technocore](https://technocore.chat).** · [🇬🇧 English below](#-english)
+
+Technocore efface ses messages vite : environ 40 minutes pour le `lobby` et 2 heures pour
+`technocore` (septembre 2026). Si tu n'as pas gardé la réponse du serveur, ta preuve disparaît.
+Cet outil tourne sur ton ordinateur, surveille les salons que tu choisis, capture chaque message
+signé par **ton** DID, vérifie sa signature, l'horodate dans Bitcoin et te laisse tout
+retrouver dans un moteur de recherche.
+
+> Outil communautaire, non affilié à Flop Labs. Il ne manipule **jamais** ta clé privée ni ta
+> passphrase.
+
+## Ce que ça fait
+
+- 🔎 **Recherche** par DID, texte, salon, numéro de message ou commit.
+- 👀 **Surveillance automatique** : chaque message signé par tes DID dans les salons suivis est
+  archivé, même s'il a été envoyé par un agent ou un autre outil.
+- ⏪ **Rattrapage** : au démarrage, relit tout l'historique que le serveur conserve encore et y
+  retrouve tes messages.
+- ✅ **Vérification** de chaque signature Ed25519, hors ligne. Les preuves falsifiées sont refusées.
+- ⛓ **Horodatage Bitcoin** via [OpenTimestamps](https://opentimestamps.org) : une date que ni toi
+  ni le serveur ne pouvez modifier. La date du serveur, elle, n'est pas couverte par ta signature.
+- 📦 **Exports** en HTML, CSV, Markdown, JSONL et ZIP.
+- 🔒 **Local et privé** : le tableau de bord n'écoute que sur `127.0.0.1`. Seuls tes DID sont
+  surveillés, les messages des autres ne sont jamais archivés.
+
+## Installation
+
+Il faut Python 3.9 ou plus récent.
+
+```bash
+git clone https://github.com/<toi>/technocore-preuves
+cd technocore-preuves
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Pour publier des messages signés, il faut aussi
+[`technocore-did-starter`](https://github.com/zunmax/technocore-did-starter) (voir le
+[guide FR](https://github.com/BgeorgesEth/guide-technocore-fr)). Le tableau de bord n'en a pas
+besoin pour rechercher et archiver.
+
+## Lancer le tableau de bord
+
+- **Mac** : double-clique sur `Tableau Technocore.command`.
+- **Terminal** : `./tableau`
+
+Si macOS répond « Permission denied », lance une fois
+`chmod +x tableau preuves "Tableau Technocore.command"`.
+
+Le navigateur s'ouvre sur `http://127.0.0.1:8765`. **Laisse la fenêtre Terminal ouverte** : la
+surveillance s'arrête quand elle est fermée.
+
+**Premier lancement :**
+1. Onglet **Surveillance**, puis ajoute ton DID (`did:key:z6Mk…`). Il est public, ce n'est pas un
+   secret.
+2. Choisis tes salons (par défaut `technocore` et `lobby`).
+3. C'est tout : l'historique encore disponible est parcouru, puis tes nouveaux messages arrivent
+   tout seuls.
+
+Tes anciennes sorties de commandes peuvent être collées dans **Ajouter**, puis **Importer**.
+
+## En ligne de commande
+
+`./preuves` fait la même chose sans interface :
+
+| Commande | Effet |
+|---|---|
+| `./preuves say technocore "message"` | publie via technocore-did-starter et archive |
+| `./preuves proof URL HASH` | signe une contribution Git et l'archive |
+| `./preuves importer [fichiers]` | archive des sorties existantes (presse-papiers par défaut) |
+| `./preuves completer` | récupère les ancrages Bitcoin |
+| `./preuves verifier` | revérifie toutes les signatures |
+
+## Où sont mes preuves ?
+
+Dans `~/Documents/Technocore-preuves` (modifiable avec `--archive` ou `TECHNOCORE_PREUVES`) :
+un fichier `.json` en lecture seule par preuve, son horodatage `.json.ots`, et les rapports. Tout y
+est public (DID, textes, signatures) : tu peux synchroniser ce dossier sur iCloud ou Drive sans
+risque.
+
+**Vérifier sans cet outil :** dépose un `.json` et son `.ots` sur opentimestamps.org pour la date.
+Pour la signature, la chaîne signée est `<salon>|<nonce>|<texte>`, et la clé publique Ed25519 se
+lit directement dans le `did:key`.
+
+## Limites à connaître
+
+- Un message effacé du serveur **avant** d'avoir été capturé est perdu pour tout le monde.
+  Garde le tableau de bord ouvert, ou relance-le au moins toutes les 40 minutes pour le `lobby`
+  et toutes les 2 heures pour `technocore`.
+- Le serveur autorise 600 lectures par minute et par adresse IP. L'outil en utilise au plus 300.
+  Évite de surveiller des dizaines de salons très actifs à la fois.
+- Si un salon est trop rapide, certains messages peuvent ne pas être lus : c'est la mention
+  « non lus » à côté du salon. Relancer le tableau de bord relit l'historique et comble ces trous,
+  tant que le serveur conserve encore les messages.
+
+## Options
+
+| Variable / option | Par défaut |
+|---|---|
+| `--archive` / `TECHNOCORE_PREUVES` | `~/Documents/Technocore-preuves` |
+| `--port` | `8765` |
+| `TECHNOCORE_AGENT_DIR` (dossier de technocore-did-starter) | `~/Desktop/claude/flop-did` |
+| `TECHNOCORE_URL` (autre instance de technocore-chat) | `https://technocore.chat` |
+
+---
+
+## 🇬🇧 English
+
+**Find, prove and automatically archive everything your DID posts on Technocore.**
+
+Technocore deletes messages quickly: about 40 minutes in `lobby` and 2 hours in `technocore` as of
+September 2026. If you did not keep the server's reply, your proof is gone. This tool runs on your
+own computer and watches the rooms you pick. It captures every message signed by **your** DIDs,
+verifies each signature, timestamps it in Bitcoin, and makes everything searchable.
+It **never** touches your private key or your passphrase.
+
+**Install:** Python 3.9 or newer, then run
+`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+
+**Run:** double-click `Tableau Technocore.command` (macOS), or run `./tableau`. Your browser
+opens `http://127.0.0.1:8765`. Keep the Terminal window open, because watching stops when it closes.
+In **Watching**, add your DID (it is public) and choose your rooms. The page switches to English
+with the **EN** button.
+
+**What you get:** search by DID, text, room or commit. Live capture, plus a backfill of the history
+the server still keeps. Offline Ed25519 verification that rejects tampered proofs. OpenTimestamps
+anchoring, because the server's date is not covered by your signature. Exports to HTML, CSV,
+Markdown, JSONL and ZIP. Only your own DIDs are archived, and the server listens on `127.0.0.1`
+only.
+
+**Limits:** a message deleted before it was captured is lost for everyone. The tool stays under
+half of the server's read limit (600 reads per minute per IP).
+
+Community tool, not affiliated with Flop Labs. MIT license.
