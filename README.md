@@ -9,6 +9,8 @@ Cet outil tourne sur ton ordinateur, surveille les salons que tu choisis, captur
 signé par **ton** DID, vérifie sa signature, l'horodate dans Bitcoin et te laisse tout
 retrouver dans un moteur de recherche.
 
+> 🧒 **Débutant ?** Suis le [tuto pas à pas, version ELI5](TUTO.md).
+
 > Outil communautaire, non affilié à Flop Labs. Il ne manipule **jamais** ta clé privée ni ta
 > passphrase.
 
@@ -31,7 +33,7 @@ retrouver dans un moteur de recherche.
 Il faut Python 3.9 ou plus récent.
 
 ```bash
-git clone https://github.com/<toi>/technocore-preuves
+git clone https://github.com/BgeorgesEth/technocore-preuves
 cd technocore-preuves
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
