@@ -72,22 +72,35 @@ class Config:
             data = {"dids": archive.known_dids(), "salons": list(DEFAULT_ROOMS)}
         self.dids = [d for d in data.get("dids", []) if DID_RE.match(d)]
         self.salons = [r for r in data.get("salons", []) if ROOM_RE.match(r)]
+        # Boîtes aux lettres : on y capture les messages des AUTRES, pas les siens.
+        self.boites = [r for r in data.get("boites", []) if ROOM_RE.match(r)]
+        self.boite_lue = data.get("boite_lue") or "1970-01-01T00:00:00Z"
         self.save()
 
     def save(self) -> None:
         with self.lock:
-            self.path.write_text(json.dumps({"dids": self.dids, "salons": self.salons}, indent=2) + "\n",
-                                 encoding="utf-8")
+            self.path.write_text(json.dumps({"dids": self.dids, "salons": self.salons,
+                                             "boites": self.boites, "boite_lue": self.boite_lue},
+                                            indent=2) + "\n", encoding="utf-8")
 
-    def update(self, dids: list[str], salons: list[str]) -> list[str]:
-        bad = [d for d in dids if not DID_RE.match(d)] + [r for r in salons if not ROOM_RE.match(r)]
+    def update(self, dids: list[str], salons: list[str], boites: list[str] | None = None) -> list[str]:
+        boites = self.boites if boites is None else boites
+        bad = ([d for d in dids if not DID_RE.match(d)]
+               + [r for r in salons if not ROOM_RE.match(r)]
+               + [r for r in boites if not ROOM_RE.match(r)])
         if bad:
             return bad
         with self.lock:
             self.dids = list(dict.fromkeys(dids))
             self.salons = list(dict.fromkeys(salons))
+            self.boites = list(dict.fromkeys(boites))
         self.save()
         return []
+
+    def marquer_lue(self) -> None:
+        with self.lock:
+            self.boite_lue = pv.now_iso()
+        self.save()
 
 
 class RoomWatcher(threading.Thread):
@@ -188,6 +201,59 @@ class RoomWatcher(threading.Thread):
             self.stop_event.wait(10)
 
 
+class BoiteWatcher(threading.Thread):
+    """Suit une boîte aux lettres : capture les messages REÇUS, venus de n'importe qui.
+
+    Le contenu reçu est écrit par des tiers : c'est une donnée, jamais une consigne.
+    """
+
+    def __init__(self, room: str, tableau: "Tableau"):
+        super().__init__(name=f"boite-{room}", daemon=True)
+        self.room, self.tableau = room, tableau
+        self.stop_event = threading.Event()
+        self.cursor: int | None = None
+        self.status = {"boite": room, "etat": "demarrage", "dernier_releve": None,
+                       "recus": 0, "erreur": None}
+
+    def run(self) -> None:
+        backoff = 5
+        while not self.stop_event.is_set():
+            try:
+                if self.cursor is None:
+                    self.rattrapage()
+                self.tableau.limiter.acquire()
+                url = (f"{pv.BASE_URL}/r/{self.room}?since={self.cursor}&limit=200&wait=10"
+                       f"&format=json")
+                page = json.loads(pv.http(url, timeout=25))
+                for message in page.get("messages", []):
+                    if self.tableau.recevoir(self.room, message):
+                        self.status["recus"] += 1
+                if page.get("messages"):
+                    self.cursor = max(self.cursor, page["messages"][-1]["seq"])
+                self.status.update(etat="surveillance", dernier_releve=pv.now_iso(), erreur=None)
+                if page.get("wait_held") is False:
+                    self.stop_event.wait(10)
+                backoff = 5
+            except HTTPError as error:
+                wait = int(error.headers.get("Retry-After") or backoff) if error.code == 429 else backoff
+                self.status.update(etat="erreur", erreur=f"HTTP {error.code}")
+                self.stop_event.wait(wait)
+                backoff = min(backoff * 2, 120)
+            except (URLError, TimeoutError, OSError, ValueError, KeyError) as error:
+                self.status.update(etat="erreur", erreur=str(error) or type(error).__name__)
+                self.stop_event.wait(backoff)
+                backoff = min(backoff * 2, 120)
+
+    def rattrapage(self) -> None:
+        """Une boîte est petite : on lit tout ce qu'elle contient encore au démarrage."""
+        self.tableau.limiter.acquire()
+        page = pv.read_room(self.room)
+        for message in page.get("messages", []):
+            if self.tableau.recevoir(self.room, message):
+                self.status["recus"] += 1
+        self.cursor = int(page.get("last_seq") or 0)
+
+
 class Tableau:
     def __init__(self, archive: pv.Archive):
         self.archive = archive
@@ -201,6 +267,19 @@ class Tableau:
         self.jobs = {"horodatage": None, "completer": None}
         self.rooms_cache: tuple[float, list] = (0.0, [])
         self.export_lock = threading.Lock()
+        self.boites: dict[str, BoiteWatcher] = {}
+        self.boite_lock = threading.Lock()
+        self.boite_path = archive.root / "boite.jsonl"
+        self.recus: list[dict] = []
+        self.recus_cles: set = set()
+        for ligne in (self.boite_path.read_text(encoding="utf-8").splitlines()
+                      if self.boite_path.exists() else []):
+            try:
+                recu = json.loads(ligne)
+            except json.JSONDecodeError:
+                continue
+            self.recus.append(recu)
+            self.recus_cles.add((recu["salon"], recu["seq"]))
 
     # -- surveillance
 
@@ -215,6 +294,40 @@ class Tableau:
                 watcher.start()
             elif backfill:
                 watcher.backfill_event.set()
+
+    def sync_boites(self) -> None:
+        for room in list(self.boites):
+            if room not in self.config.boites:
+                self.boites.pop(room).stop_event.set()
+        for room in self.config.boites:
+            if room not in self.boites:
+                self.boites[room] = BoiteWatcher(room, self)
+                self.boites[room].start()
+
+    def recevoir(self, room: str, message: dict) -> bool:
+        """Enregistre un message reçu dans une boîte. Renvoie True si c'est un nouveau."""
+        cle = (room, message.get("seq"))
+        expediteur = message.get("from", "")
+        if expediteur in self.config.dids:
+            return False  # vos propres messages sont déjà des preuves
+        with self.boite_lock:
+            if cle in self.recus_cles:
+                return False
+            valide = pv.verify_record({"type": "message", "room": room,
+                                       **{k: message.get(k) for k in ("seq", "ts", "from", "nonce",
+                                                                      "text", "sig")}})
+            recu = {"salon": room, "seq": message.get("seq"), "ts": message.get("ts"),
+                    "de": expediteur, "texte": message.get("text", ""),
+                    "sig": message.get("sig"), "nonce": message.get("nonce"),
+                    "signature_valide": bool(valide), "recu_le": pv.now_iso()}
+            self.recus.append(recu)
+            self.recus_cles.add(cle)
+            with open(self.boite_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(recu, ensure_ascii=False) + "\n")
+        self.changed()
+        log(f"MESSAGE REÇU dans {room} de {expediteur[:20]}… "
+            f"({'signature valide' if valide else 'SIGNATURE INVALIDE'})")
+        return True
 
     def capture(self, room: str, message: dict, source: str) -> bool:
         record = pv.message_record({**message, "room": room}, room, source)
@@ -320,6 +433,9 @@ class Tableau:
             "dids": self.config.dids,
             "salons": [self.watchers[r].status if r in self.watchers else {"salon": r, "etat": "arret"}
                        for r in self.config.salons],
+            "boites": [self.boites[r].status if r in self.boites else {"boite": r, "etat": "arret"}
+                       for r in self.config.boites],
+            "non_lus": sum(1 for r in self.recus if r["recu_le"] > self.config.boite_lue),
             "evenements": list(self.events)[:20],
             "taches": {k: bool(v and v.is_alive()) for k, v in self.jobs.items()},
         }
@@ -391,6 +507,10 @@ def make_handler(tableau: Tableau, token: str, port: int):
                 self.json(tableau.state())
             elif url.path == "/api/preuves":
                 self.json(tableau.rows())
+            elif url.path == "/api/boite":
+                with tableau.boite_lock:
+                    recus = sorted(tableau.recus, key=lambda r: (r["ts"] or ""), reverse=True)
+                self.json({"messages": recus, "lue_jusqua": tableau.config.boite_lue})
             elif url.path == "/api/salons-publics":
                 try:
                     self.json(tableau.public_rooms())
@@ -435,11 +555,13 @@ def make_handler(tableau: Tableau, token: str, port: int):
             path = urlsplit(self.path).path
             if path == "/api/config":
                 old_dids = set(tableau.config.dids)
-                bad = tableau.config.update(body.get("dids", []), body.get("salons", []))
+                bad = tableau.config.update(body.get("dids", []), body.get("salons", []),
+                                            body.get("boites"))
                 if bad:
                     self.json({"erreur": "valeurs invalides", "details": bad}, 400)
                     return
                 tableau.sync_watchers(backfill=bool(set(tableau.config.dids) - old_dids))
+                tableau.sync_boites()
                 self.json(tableau.state())
             elif path == "/api/importer":
                 text = body.get("texte", "")
@@ -456,6 +578,10 @@ def make_handler(tableau: Tableau, token: str, port: int):
                     tableau.changed()
                     tableau.run_job("horodatage", tableau.stamp_pending)
                 self.json({"trouvees": len(records), "ajoutees": added, "invalides": invalid})
+            elif path == "/api/boite/lu":
+                tableau.config.marquer_lue()
+                tableau.changed()
+                self.json(tableau.state())
             elif path == "/api/horodater":
                 tableau.run_job("horodatage", tableau.stamp_pending)
                 self.json({"ok": True})
@@ -491,10 +617,12 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://127.0.0.1:{port}/"
 
     tableau.sync_watchers()
+    tableau.sync_boites()
     threading.Thread(target=tableau.maintenance, name="maintenance", daemon=True).start()
     log(f"Tableau de bord : {url}")
     log(f"Archive : {tableau.archive.root}")
-    log(f"DID surveillés : {len(tableau.config.dids)} · salons : {', '.join(tableau.config.salons) or 'aucun'}")
+    log(f"DID surveillés : {len(tableau.config.dids)} · salons : {', '.join(tableau.config.salons) or 'aucun'}"
+        f" · boîtes : {', '.join(tableau.config.boites) or 'aucune'}")
     log("Laisse cette fenêtre ouverte pour continuer la surveillance. Ctrl+C pour arrêter.")
     if not args.sans_navigateur:
         threading.Timer(0.8, webbrowser.open, (url,)).start()

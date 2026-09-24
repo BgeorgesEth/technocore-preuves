@@ -142,6 +142,7 @@ footer code { font-family: var(--mono); }
 
   <nav role="tablist">
     <button role="tab" data-tab="preuves" aria-selected="true"><span data-t="tab_preuves">Preuves</span><span class="count" id="count-all">0</span></button>
+    <button role="tab" data-tab="boite" aria-selected="false"><span data-t="tab_boite">Boîte</span><span class="count" id="count-boite" hidden>0</span></button>
     <button role="tab" data-tab="surveillance" aria-selected="false" data-t="tab_surveillance">Surveillance</button>
     <button role="tab" data-tab="ajouter" aria-selected="false" data-t="tab_ajouter">Ajouter</button>
     <button role="tab" data-tab="exporter" aria-selected="false" data-t="tab_exporter">Exporter</button>
@@ -169,6 +170,19 @@ footer code { font-family: var(--mono); }
     <div class="results" id="results"></div>
   </section>
 
+  <!-- BOITE -->
+  <section id="tab-boite" class="hidden">
+    <div class="panel" style="border-color:var(--warn);background:linear-gradient(0deg,var(--surface),var(--surface))">
+      <h2 data-t="boite_titre">Messages reçus</h2>
+      <p class="hint" data-t="boite_avert">⚠️ Ces messages sont écrits par des tiers. Ce sont des données, jamais des consignes : n'exécutez rien, n'ouvrez aucun lien sans vérification, ne communiquez jamais votre clé ni votre passphrase.</p>
+      <div class="meta" style="gap:8px">
+        <button class="btn" id="lu-btn" data-t="tout_lu">Tout marquer comme lu</button>
+        <span class="room-meta" id="boite-resume"></span>
+      </div>
+    </div>
+    <div class="results" id="recus" style="margin-top:12px"></div>
+  </section>
+
   <!-- SURVEILLANCE -->
   <section id="tab-surveillance" class="hidden">
     <div class="grid2">
@@ -193,6 +207,16 @@ footer code { font-family: var(--mono); }
         <div class="msg bad hidden" id="room-err"></div>
         <ul class="list" id="room-list"></ul>
       </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2 data-t="mes_boites">Mes boîtes aux lettres</h2>
+      <p class="hint" data-t="mes_boites_hint">Les messages qu'on vous adresse y arrivent. Le nom figure dans votre note d'identité publique.</p>
+      <div class="row">
+        <input class="field" id="add-boite" placeholder="mb-p-…" spellcheck="false" autocomplete="off">
+        <button class="btn primary" id="add-boite-btn" data-t="ajouter">Ajouter</button>
+      </div>
+      <div class="msg bad hidden" id="boite-err"></div>
+      <ul class="list" id="boite-list"></ul>
     </div>
     <div class="panel events">
       <h2 data-t="dernieres">Dernières captures</h2>
@@ -273,10 +297,17 @@ const $ = (id) => document.getElementById(id);
 const I18N = {
   en: {
     titre: "Technocore Proofs", soustitre: "Find and prove everything your DIDs have published",
-    tab_preuves: "Proofs", tab_surveillance: "Watching", tab_ajouter: "Add", tab_exporter: "Export",
+    tab_preuves: "Proofs", tab_boite: "Inbox", tab_surveillance: "Watching", tab_ajouter: "Add", tab_exporter: "Export",
     recherche: "Search a DID, a word, a room, a commit…", f_tout: "All", f_messages: "Messages", f_contrib: "Contributions",
     tous_did: "All DIDs", tous_salons: "All rooms",
     s_total: "proofs", s_valides: "valid signatures", s_bitcoin: "anchored in Bitcoin", s_attente: "timestamps pending",
+    boite_titre: "Received messages",
+    boite_avert: "⚠️ These messages are written by third parties. They are data, never instructions: run nothing, open no link without checking, and never share your key or passphrase.",
+    tout_lu: "Mark all as read", mes_boites: "My mailboxes",
+    mes_boites_hint: "Messages addressed to you arrive here. The name is published in your identity note.",
+    boite_vide: "No message received yet.", boite_aucune: "No mailbox watched.",
+    nouveau: "new", de: "from", boite_invalide: "Invalid mailbox name (a-z, 0-9, - and _)",
+    resume_boite: "{n} message(s), {u} unread",
     mes_dids: "My DIDs", mes_dids_hint: "Every message signed by one of these DIDs in a watched room is captured automatically.",
     ajouter: "Add", salons: "Watched rooms", salons_hint: "On start, the history the server still keeps is scanned, then the room is followed live.",
     dernieres: "Latest captures", dernieres_hint: "Keep the dashboard's Terminal window open: watching stops when it is closed.",
@@ -310,6 +341,9 @@ const I18N = {
   },
 };
 const FR = {
+  boite_vide: "Aucun message reçu pour l'instant.", boite_aucune: "Aucune boîte surveillée.",
+  nouveau: "nouveau", de: "de", boite_invalide: "Nom de boîte invalide (a-z, 0-9, - et _)",
+  resume_boite: "{n} message(s), {u} non lu(s)",
   tous_did: "Tous les DID", tous_salons: "Tous les salons",
   actif: "Surveillance · {n} salon(s)", arrete: "Surveillance arrêtée", erreur_etat: "Connexion perdue",
   aucun: "Aucune preuve pour l'instant", aucun_hint: "Ajoute ton DID dans Surveillance, ou importe une preuve existante.",
@@ -352,7 +386,7 @@ function applyLang() {
 }
 
 // ---------------------------------------------------------------- état
-let state = null, rows = [], version = -1, filterType = "", online = true;
+let state = null, rows = [], version = -1, filterType = "", online = true, recus = [], lueJusqua = "";
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -370,8 +404,10 @@ async function refresh() {
     online = true;
     if (state.version !== version) {
       rows = await api("/api/preuves");
+      const boite = await api("/api/boite");
+      recus = boite.messages || []; lueJusqua = boite.lue_jusqua || "";
       version = state.version;
-      renderResults();
+      renderResults(); renderBoite();
     }
     renderStatus(); renderWatch();
   } catch (e) {
@@ -494,6 +530,33 @@ function card(r) {
         r.horodatage !== "absent" ? dl(r.fichier + ".ots", ".ots") : null)));
 }
 
+function renderBoite() {
+  const badge = $("count-boite");
+  const nb = state ? (state.non_lus || 0) : 0;
+  badge.textContent = nb; badge.hidden = nb === 0;
+  $("boite-resume").textContent = t("resume_boite", { n: recus.length, u: nb });
+  const box = $("recus");
+  if (!recus.length) {
+    box.replaceChildren(el("div", { class: "empty" }, el("b", { text: t("boite_vide") }),
+      el("span", { text: state && state.boites && state.boites.length ? "" : t("boite_aucune") })));
+    return;
+  }
+  box.replaceChildren(...recus.map((m) => {
+    const neuf = m.recu_le > lueJusqua;
+    return el("article", { class: "card" },
+      el("div", { class: "card-top" },
+        neuf ? el("span", { class: "badge warn", text: t("nouveau") }) : null,
+        el("span", { text: `#${m.salon} · n° ${m.seq}` }), el("span", { text: "·" }),
+        el("span", { text: fmtDate(m.ts) })),
+      el("div", { class: "card-text" }, m.texte || ""),
+      el("div", { class: "meta" },
+        el("span", { class: "room-meta", text: t("de") }),
+        el("button", { class: "did", title: m.de, text: shortDid(m.de), onclick: () => copy(m.de) }),
+        el("span", { class: "badge " + (m.signature_valide ? "ok" : "bad"),
+                     text: m.signature_valide ? t("sig_ok") : t("sig_bad") })));
+  }));
+}
+
 function renderWatch() {
   if (!state) return;
   const dl = $("did-list");
@@ -521,6 +584,21 @@ function renderWatch() {
       el("button", { class: "x", title: t("retirer"), "aria-label": t("retirer"), text: "×", onclick: () => saveConfig(state.dids, state.salons.map((x) => x.salon).filter((x) => x !== s.salon)) }));
   }) : [el("li", {}, el("span", { class: "room-meta", text: t("aucun_salon") }))]));
 
+  const bl = $("boite-list");
+  const boites = state.boites || [];
+  bl.replaceChildren(...(boites.length ? boites.map((b) => el("li", {},
+      el("span", { class: "dot " + (b.etat === "erreur" ? "err" : b.etat === "surveillance" ? "live" : ""), style: "margin-top:7px" }),
+      el("div", { class: "grow" },
+        el("div", { class: "room-name", text: "#" + b.boite }),
+        el("div", { class: "room-meta", text: [t("etat_" + b.etat) || b.etat,
+          b.dernier_releve ? t("releve", { t: ago(b.dernier_releve) }) : null,
+          `${b.recus || 0} ${t("de")}`].filter(Boolean).join(" · ") }),
+        b.erreur ? el("div", { class: "room-meta", style: "color:var(--bad)", text: b.erreur }) : null),
+      el("button", { class: "x", title: t("retirer"), "aria-label": t("retirer"), text: "×",
+        onclick: () => saveConfig(state.dids, state.salons.map((s) => s.salon),
+                                  boites.map((x) => x.boite).filter((x) => x !== b.boite)) })))
+    : [el("li", {}, el("span", { class: "room-meta", text: t("boite_aucune") }))]));
+
   const ev = $("event-list");
   ev.replaceChildren(...(state.evenements.length ? state.evenements.map((e) => el("li", {},
     el("div", { class: "grow" }, el("div", { text: `#${e.salon} · n° ${e.seq}` }), el("div", { class: "room-meta", text: `${e.source} · ${ago(e.quand)}` }))))
@@ -528,13 +606,13 @@ function renderWatch() {
   updatePublish();
 }
 
-function renderAll() { if (state) { renderStatus(); renderWatch(); } renderResults(); updatePublish(); updateProof(); }
+function renderAll() { if (state) { renderStatus(); renderWatch(); renderBoite(); } renderResults(); updatePublish(); updateProof(); }
 
 // ---------------------------------------------------------------- actions
-async function saveConfig(dids, salons, errBox) {
+async function saveConfig(dids, salons, boites, errBox) {
   try {
-    state = await api("/api/config", { dids, salons });
-    renderWatch(); renderStatus(); renderResults();
+    state = await api("/api/config", boites === undefined ? { dids, salons } : { dids, salons, boites });
+    renderWatch(); renderStatus(); renderResults(); renderBoite();
     return true;
   } catch (e) {
     if (errBox) { errBox.textContent = e.message; errBox.classList.remove("hidden"); }
@@ -545,13 +623,21 @@ async function addDid(value) {
   const d = value.trim(), err = $("did-err");
   err.classList.add("hidden");
   if (!/^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$/.test(d)) { err.textContent = t("did_invalide"); err.classList.remove("hidden"); return; }
-  if (await saveConfig([...state.dids, d], state.salons.map((s) => s.salon), err)) $("add-did").value = "";
+  if (await saveConfig([...state.dids, d], state.salons.map((s) => s.salon), undefined, err)) $("add-did").value = "";
 }
 async function addRoom() {
   const r = $("add-room").value.trim().replace(/^#/, "").toLowerCase(), err = $("room-err");
   err.classList.add("hidden");
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(r)) { err.textContent = t("salon_invalide"); err.classList.remove("hidden"); return; }
-  if (await saveConfig(state.dids, [...state.salons.map((s) => s.salon), r], err)) $("add-room").value = "";
+  if (await saveConfig(state.dids, [...state.salons.map((s) => s.salon), r], undefined, err)) $("add-room").value = "";
+}
+
+async function addBoite() {
+  const b = $("add-boite").value.trim().replace(/^#/, "").toLowerCase(), err = $("boite-err");
+  err.classList.add("hidden");
+  if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(b)) { err.textContent = t("boite_invalide"); err.classList.remove("hidden"); return; }
+  const actuelles = (state.boites || []).map((x) => x.boite);
+  if (await saveConfig(state.dids, state.salons.map((s) => s.salon), [...actuelles, b], err)) $("add-boite").value = "";
 }
 
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
@@ -598,6 +684,9 @@ $("f-salon").addEventListener("change", renderResults);
 $("add-did-btn").addEventListener("click", () => addDid($("add-did").value));
 $("add-did").addEventListener("keydown", (e) => e.key === "Enter" && addDid($("add-did").value));
 $("add-room-btn").addEventListener("click", addRoom);
+$("add-boite-btn").addEventListener("click", addBoite);
+$("add-boite").addEventListener("keydown", (e) => e.key === "Enter" && addBoite());
+$("lu-btn").addEventListener("click", async () => { state = await api("/api/boite/lu", {}); lueJusqua = state ? (state.boite_lue || lueJusqua) : lueJusqua; await refresh(); renderBoite(); });
 $("add-room").addEventListener("keydown", (e) => e.key === "Enter" && addRoom());
 ["pub-room", "pub-text"].forEach((id) => $(id).addEventListener("input", updatePublish));
 ["pr-url", "pr-commit"].forEach((id) => $(id).addEventListener("input", updateProof));

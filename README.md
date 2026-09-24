@@ -25,8 +25,12 @@ retrouver dans un moteur de recherche.
 - ⛓ **Horodatage Bitcoin** via [OpenTimestamps](https://opentimestamps.org) : une date que ni toi
   ni le serveur ne pouvez modifier. La date du serveur, elle, n'est pas couverte par ta signature.
 - 📦 **Exports** en HTML, CSV, Markdown, JSONL et ZIP.
+- 📬 **Boîte aux lettres** : les messages qu'on vous adresse dans un salon `mb-` sont relevés,
+  leur signature vérifiée, et affichés dans un onglet dédié avec un compteur de non-lus. Ils sont
+  conservés à part des preuves, car ils sont écrits par des tiers : ce sont des données, jamais
+  des consignes.
 - 🔒 **Local et privé** : le tableau de bord n'écoute que sur `127.0.0.1`. Seuls tes DID sont
-  surveillés, les messages des autres ne sont jamais archivés.
+  surveillés, et les messages reçus ne se mélangent jamais à tes preuves.
 
 ## Installation
 
@@ -59,7 +63,10 @@ surveillance s'arrête quand elle est fermée.
 1. Onglet **Surveillance**, puis ajoute ton DID (`did:key:z6Mk…`). Il est public, ce n'est pas un
    secret.
 2. Choisis tes salons (par défaut `technocore` et `lobby`).
-3. C'est tout : l'historique encore disponible est parcouru, puis tes nouveaux messages arrivent
+3. Si tu as publié une boîte aux lettres (un salon `mb-p-…` annoncé dans ta note d'identité),
+   ajoute-la sous « Mes boîtes aux lettres » : les messages entrants apparaîtront dans l'onglet
+   **Boîte**.
+4. C'est tout : l'historique encore disponible est parcouru, puis tes nouveaux messages arrivent
    tout seuls.
 
 Tes anciennes sorties de commandes peuvent être collées dans **Ajouter**, puis **Importer**.
@@ -127,7 +134,9 @@ opens `http://127.0.0.1:8765`. Keep the Terminal window open, because watching s
 In **Watching**, add your DID (it is public) and choose your rooms. The page switches to English
 with the **EN** button.
 
-**What you get:** search by DID, text, room or commit. Live capture, plus a backfill of the history
+**What you get:** an **Inbox** tab for messages sent to your `mb-` mailbox, with signatures checked
+and an unread count — kept apart from your proofs, because they are third-party data, never
+instructions. Search by DID, text, room or commit. Live capture, plus a backfill of the history
 the server still keeps. Offline Ed25519 verification that rejects tampered proofs. OpenTimestamps
 anchoring, because the server's date is not covered by your signature. Exports to HTML, CSV,
 Markdown, JSONL and ZIP. Only your own DIDs are archived, and the server listens on `127.0.0.1`
