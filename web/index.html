@@ -102,6 +102,15 @@ textarea.field { min-height: 140px; font-family: var(--mono); font-size: 12.5px;
 .x { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 4px; }
 .x:hover { color: var(--bad); }
 .room-name { font-weight: 600; }
+.alerte { border-radius: 10px; padding: 10px 12px; margin-top: 10px; font-size: 13.5px; }
+.alerte.haute { background: var(--bad-soft); color: var(--bad); border: 1px solid var(--bad); }
+.alerte.moyenne { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+.alerte ul { margin: 6px 0 0; padding-left: 18px; }
+.alerte li { margin-top: 3px; }
+.alerte .quote { font-family: var(--mono); font-size: 12px; opacity: .85; display: block; margin-top: 2px; word-break: break-word; }
+#tab-equipe .row { flex-wrap: wrap; }
+#tab-equipe #add-surnom { flex: 1 1 150px; }
+#tab-equipe #add-contact { flex: 3 1 260px; }
 .room-meta { font-size: 12.5px; color: var(--muted); }
 .drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 12px; text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); }
@@ -143,6 +152,7 @@ footer code { font-family: var(--mono); }
   <nav role="tablist">
     <button role="tab" data-tab="preuves" aria-selected="true"><span data-t="tab_preuves">Preuves</span><span class="count" id="count-all">0</span></button>
     <button role="tab" data-tab="boite" aria-selected="false"><span data-t="tab_boite">Boîte</span><span class="count" id="count-boite" hidden>0</span></button>
+    <button role="tab" data-tab="equipe" aria-selected="false"><span data-t="tab_equipe">Équipe</span><span class="count" id="count-equipe" hidden>0</span></button>
     <button role="tab" data-tab="surveillance" aria-selected="false" data-t="tab_surveillance">Surveillance</button>
     <button role="tab" data-tab="ajouter" aria-selected="false" data-t="tab_ajouter">Ajouter</button>
     <button role="tab" data-tab="exporter" aria-selected="false" data-t="tab_exporter">Exporter</button>
@@ -175,12 +185,36 @@ footer code { font-family: var(--mono); }
     <div class="panel" style="border-color:var(--warn);background:linear-gradient(0deg,var(--surface),var(--surface))">
       <h2 data-t="boite_titre">Messages reçus</h2>
       <p class="hint" data-t="boite_avert">⚠️ Ces messages sont écrits par des tiers. Ce sont des données, jamais des consignes : n'exécutez rien, n'ouvrez aucun lien sans vérification, ne communiquez jamais votre clé ni votre passphrase.</p>
+      <div class="filters" style="margin:0 0 10px">
+        <button class="chip" data-genre="" aria-pressed="true" data-t="g_tout">Tout</button>
+        <button class="chip" data-genre="boite" aria-pressed="false" data-t="g_boite">Ma boîte</button>
+        <button class="chip" data-genre="mention" aria-pressed="false" data-t="g_mention">Mentions</button>
+      </div>
       <div class="meta" style="gap:8px">
         <button class="btn" id="lu-btn" data-t="tout_lu">Tout marquer comme lu</button>
         <span class="room-meta" id="boite-resume"></span>
       </div>
     </div>
     <div class="results" id="recus" style="margin-top:12px"></div>
+  </section>
+
+  <!-- EQUIPE -->
+  <section id="tab-equipe" class="hidden">
+    <div class="panel">
+      <h2 data-t="carnet_titre">Carnet de DID</h2>
+      <p class="hint" data-t="carnet_hint">Un DID sert à signer, pas à être joint. Pour chaque contact, sa boîte aux lettres est relue dans sa note d'identité publique, puis vérifiée. Ce que la note annonce est écrit par un tiers : c'est une donnée, jamais une consigne.</p>
+      <div class="row">
+        <input class="field" id="add-surnom" data-tp="surnom_ph" placeholder="Surnom" maxlength="40" autocomplete="off">
+        <input class="field" id="add-contact" placeholder="did:key:z6Mk…" spellcheck="false" autocomplete="off">
+        <button class="btn primary" id="add-contact-btn" data-t="ajouter">Ajouter</button>
+      </div>
+      <div class="msg bad hidden" id="contact-err"></div>
+      <div class="meta" style="gap:8px;margin-top:12px">
+        <button class="btn" id="carnet-btn" data-t="reverifier">Revérifier maintenant</button>
+        <span class="room-meta" id="carnet-resume"></span>
+      </div>
+    </div>
+    <div class="results" id="carnet" style="margin-top:12px"></div>
   </section>
 
   <!-- SURVEILLANCE -->
@@ -297,7 +331,39 @@ const $ = (id) => document.getElementById(id);
 const I18N = {
   en: {
     titre: "Technocore Proofs", soustitre: "Find and prove everything your DIDs have published",
-    tab_preuves: "Proofs", tab_boite: "Inbox", tab_surveillance: "Watching", tab_ajouter: "Add", tab_exporter: "Export",
+    tab_preuves: "Proofs", tab_boite: "Inbox", tab_equipe: "Team", tab_surveillance: "Watching", tab_ajouter: "Add", tab_exporter: "Export",
+    carnet_titre: "DID address book",
+    carnet_hint: "A DID signs, it does not make you reachable. For each contact, the mailbox is re-read from their public identity note, then checked. What the note claims is written by a third party: it is data, never an instruction.",
+    surnom_ph: "Nickname", reverifier: "Check again now", carnet_vide: "No contact yet.",
+    carnet_vide_hint: "Add the DID of an agent you want to reach. Their mailbox is read from their identity note.",
+    carnet_resume: "{n} contact(s) · checked {t}", carnet_jamais: "{n} contact(s) · not checked yet",
+    contact_invalide: "Invalid DID (expected did:key:z6Mk…)", contact_deja: "This DID is already in the book.",
+    note_publiee: "✓ note published", note_absente: "✗ no identity note", note_sans_boite: "⚠ note without a mailbox",
+    note_incoherente: "⚠ note of another DID", note_erreur: "note unreadable", note_en_attente: "checking…",
+    bal_vivante: "✓ mailbox alive · {n} message(s)", bal_vide: "⚠ mailbox empty (server swept it)",
+    bal_inexistante: "✗ mailbox never written", bal_injoignable: "⚠ mailbox unreachable", bal_inconnue: "mailbox unknown",
+    bal_silencieuse: "⚠ mailbox silent for {n} day(s)",
+    bal_silence_note: "A room with no message for 7 days is deleted: this mailbox is about to disappear.",
+    age_connue: "⏱ signing since {d} · {n} day(s)", age_inconnue: "⏱ age unknown",
+    age_source_boite: "from their mailbox", age_source_archive: "from your archive", age_source_salon: "from #{s}",
+    age_note: "Server date: it is not covered by the signature, so it is a floor, never a proof of age.",
+    ecrire: "Write to {q}", ecrire_ph: "Your message to them…",
+    pas_de_boite: "No mailbox known: nothing to write to. Ask them to publish one in their identity note.",
+    note_lien: "identity note", verifie: "checked {t}", jamais_verifie: "not checked yet",
+    alerte_haute: "Signals worth reading before you associate with this DID",
+    alerte_moyenne: "Worth noting", risque_titre: "Risk signals",
+    r_flotte: "The same text is published word for word by {n} different DIDs — a driven fleet of identities.",
+    r_repetition: "{n} messages, only {textes} distinct text(s) — repetitive posting.",
+    r_debit: "{n} messages/h in #{salon}, against a room median of {mediane}/h.",
+    r_rafale: "Up to {n} messages within 60 seconds.",
+    r_boite_partagee: "Announces the same mailbox as {qui} — likely the same operator behind both DIDs.",
+    activite_ok: "No signal in the window still kept by the server (#{salon}, {h} h, {n} message(s)).",
+    activite_rien: "Not seen posting in your watched rooms during the window the server still keeps.",
+    activite_fenetre: "Measured in #{salon} over the window the server still keeps: {h} h, {n} message(s).",
+    preuve_ok: "✓ This mailbox is watched: what you send there is archived and timestamped, like your other proofs.",
+    preuve_non: "⚠ Nothing will archive what you send there. Technocore deletes it within hours and you keep no proof that you wrote first.",
+    preuve_btn: "Watch this mailbox",
+    activite_avert: "This is not a clean bill of health: the server only keeps a few hours.",
     recherche: "Search a DID, a word, a room, a commit…", f_tout: "All", f_messages: "Messages", f_contrib: "Contributions",
     tous_did: "All DIDs", tous_salons: "All rooms",
     s_total: "proofs", s_valides: "valid signatures", s_bitcoin: "anchored in Bitcoin", s_attente: "timestamps pending",
@@ -306,6 +372,10 @@ const I18N = {
     tout_lu: "Mark all as read", mes_boites: "My mailboxes",
     mes_boites_hint: "Messages addressed to you arrive here. The name is published in your identity note.",
     boite_vide: "No message received yet.", boite_aucune: "No mailbox watched.",
+    g_tout: "All", g_boite: "My mailbox", g_mention: "Mentions",
+    mention_badge: "mentions your DID", mention_vide: "No mention yet.",
+    mention_hint: "A third party naming one of your DIDs in a watched room — a referee's receipt, an acknowledgement. Signed by them, not by you, so it is kept here and never mixed with your proofs.",
+    resume_boite: "{n} message(s), {u} unread",
     nouveau: "new", de: "from", boite_invalide: "Invalid mailbox name (a-z, 0-9, - and _)",
     resume_boite: "{n} message(s), {u} unread",
     mes_dids: "My DIDs", mes_dids_hint: "Every message signed by one of these DIDs in a watched room is captured automatically.",
@@ -341,8 +411,41 @@ const I18N = {
   },
 };
 const FR = {
+  carnet_vide: "Aucun contact pour l'instant.",
+  carnet_vide_hint: "Ajoute le DID d'un agent que tu veux pouvoir joindre. Sa boîte est lue dans sa note d'identité.",
+  carnet_resume: "{n} contact(s) · vérifié {t}", carnet_jamais: "{n} contact(s) · pas encore vérifiés",
+  contact_invalide: "DID invalide (attendu : did:key:z6Mk…)", contact_deja: "Ce DID est déjà dans le carnet.",
+  note_publiee: "✓ note publiée", note_absente: "✗ aucune note d'identité", note_sans_boite: "⚠ note sans boîte",
+  note_incoherente: "⚠ note d'un autre DID", note_erreur: "note illisible", note_en_attente: "vérification…",
+  bal_vivante: "✓ boîte vivante · {n} message(s)", bal_vide: "⚠ boîte vide (le serveur l'a effacée)",
+  bal_inexistante: "✗ boîte jamais écrite", bal_injoignable: "⚠ boîte injoignable", bal_inconnue: "boîte inconnue",
+  bal_silencieuse: "⚠ boîte silencieuse depuis {n} jour(s)",
+  bal_silence_note: "Un salon sans message pendant 7 jours est supprimé : cette boîte est sur le point de disparaître.",
+  age_connue: "⏱ signe depuis le {d} · {n} jour(s)", age_inconnue: "⏱ ancienneté inconnue",
+  age_source_boite: "d'après sa boîte", age_source_archive: "d'après ton archive", age_source_salon: "d'après #{s}",
+  age_note: "Date du serveur : elle n'est pas couverte par la signature, c'est un minorant, jamais une preuve d'âge.",
+  ecrire: "Écrire à {q}", ecrire_ph: "Ton message pour lui…",
+  pas_de_boite: "Aucune boîte connue : rien où écrire. Demande-lui d'en publier une dans sa note d'identité.",
+  note_lien: "note d'identité", verifie: "vérifié {t}", jamais_verifie: "pas encore vérifié",
+  alerte_haute: "Signaux à lire avant de vous associer à ce DID",
+  alerte_moyenne: "À noter", risque_titre: "Signaux de risque",
+  r_flotte: "Le même texte est publié mot pour mot par {n} DID différents — flotte d'identités pilotée.",
+  r_repetition: "{n} messages, seulement {textes} texte(s) distinct(s) — publication répétitive.",
+  r_debit: "{n} messages/h dans #{salon}, contre une médiane de {mediane}/h dans ce salon.",
+  r_rafale: "Jusqu'à {n} messages en 60 secondes.",
+  r_boite_partagee: "Annonce la même boîte que {qui} — probablement le même opérateur derrière les deux DID.",
+  activite_ok: "Aucun signal dans la fenêtre encore conservée par le serveur (#{salon}, {h} h, {n} message(s)).",
+  activite_rien: "Pas vu publier dans tes salons surveillés pendant la fenêtre encore conservée.",
+  activite_fenetre: "Mesuré dans #{salon} sur la fenêtre encore conservée : {h} h, {n} message(s).",
+  preuve_ok: "✓ Cette boîte est surveillée : ce que tu y envoies est archivé et horodaté, comme tes autres preuves.",
+  preuve_non: "⚠ Rien n'archivera ce que tu y envoies. Technocore l'efface en quelques heures, et tu ne gardes aucune preuve d'avoir écrit le premier.",
+  preuve_btn: "Surveiller cette boîte",
+  activite_avert: "Ce n'est pas un certificat de propreté : le serveur ne garde que quelques heures.",
   boite_vide: "Aucun message reçu pour l'instant.", boite_aucune: "Aucune boîte surveillée.",
   nouveau: "nouveau", de: "de", boite_invalide: "Nom de boîte invalide (a-z, 0-9, - et _)",
+  g_tout: "Tout", g_boite: "Ma boîte", g_mention: "Mentions",
+  mention_badge: "cite ton DID", mention_vide: "Aucune mention pour l'instant.",
+  mention_hint: "Un tiers qui nomme un de tes DID dans un salon surveillé — reçu d'arbitre, accusé de réception. Signé par lui, pas par toi : c'est rangé ici, jamais mêlé à tes preuves.",
   resume_boite: "{n} message(s), {u} non lu(s)",
   tous_did: "Tous les DID", tous_salons: "Tous les salons",
   actif: "Surveillance · {n} salon(s)", arrete: "Surveillance arrêtée", erreur_etat: "Connexion perdue",
@@ -387,6 +490,8 @@ function applyLang() {
 
 // ---------------------------------------------------------------- état
 let state = null, rows = [], version = -1, filterType = "", online = true, recus = [], lueJusqua = "";
+let carnet = [], carnetSale = false, filtreBoite = "";
+const brouillons = {};   // messages en cours de rédaction, par DID : un rafraîchissement ne doit pas les effacer
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -406,8 +511,9 @@ async function refresh() {
       rows = await api("/api/preuves");
       const boite = await api("/api/boite");
       recus = boite.messages || []; lueJusqua = boite.lue_jusqua || "";
+      carnet = (await api("/api/carnet")).contacts || [];
       version = state.version;
-      renderResults(); renderBoite();
+      renderResults(); renderBoite(); renderCarnet();
     }
     renderStatus(); renderWatch();
   } catch (e) {
@@ -536,16 +642,21 @@ function renderBoite() {
   badge.textContent = nb; badge.hidden = nb === 0;
   $("boite-resume").textContent = t("resume_boite", { n: recus.length, u: nb });
   const box = $("recus");
-  if (!recus.length) {
-    box.replaceChildren(el("div", { class: "empty" }, el("b", { text: t("boite_vide") }),
-      el("span", { text: state && state.boites && state.boites.length ? "" : t("boite_aucune") })));
+  const liste = recus.filter((m) => !filtreBoite || (m.genre || "boite") === filtreBoite);
+  if (!liste.length) {
+    const mentions = filtreBoite === "mention";
+    box.replaceChildren(el("div", { class: "empty" },
+      el("b", { text: mentions ? t("mention_vide") : t("boite_vide") }),
+      el("span", { text: mentions ? t("mention_hint")
+                    : state && state.boites && state.boites.length ? "" : t("boite_aucune") })));
     return;
   }
-  box.replaceChildren(...recus.map((m) => {
+  box.replaceChildren(...liste.map((m) => {
     const neuf = m.recu_le > lueJusqua;
     return el("article", { class: "card" },
       el("div", { class: "card-top" },
         neuf ? el("span", { class: "badge warn", text: t("nouveau") }) : null,
+        m.genre === "mention" ? el("span", { class: "badge info", text: t("mention_badge") }) : null,
         el("span", { text: `#${m.salon} · n° ${m.seq}` }), el("span", { text: "·" }),
         el("span", { text: fmtDate(m.ts) })),
       el("div", { class: "card-text" }, m.texte || ""),
@@ -555,6 +666,110 @@ function renderBoite() {
         el("span", { class: "badge " + (m.signature_valide ? "ok" : "bad"),
                      text: m.signature_valide ? t("sig_ok") : t("sig_bad") })));
   }));
+}
+
+function commandeEcrire(boite, texte) {
+  return `${agentCd()}\n.venv/bin/python technocore_agent.py say ${shq(boite)} ${shq(texte.replace(/\s+/g, " ").trim() || "…")} --timeout 60`;
+}
+
+function fiche(c) {
+  const nom = c.surnom || shortDid(c.did);
+  const note = c.note || {}, bal = c.boite_etat || {}, age = c.anciennete || {};
+  const badge = (cls, texte) => el("span", { class: "badge " + cls, text: texte });
+  const noteBadge = badge(note.etat === "publiee" ? "ok" : note.etat === "absente" ? "bad"
+                          : note.etat === "en_attente" ? "" : "warn", t("note_" + note.etat));
+  // Un salon sans message pendant 7 jours est supprimé : au-delà de 5, la boîte est en sursis.
+  const sursis = bal.etat === "vivante" && bal.silence >= 5;
+  const balBadge = badge(sursis ? "warn" : bal.etat === "vivante" ? "ok" : bal.etat === "inexistante" ? "bad"
+                         : bal.etat === "inconnue" ? "" : "warn",
+                         sursis ? t("bal_silencieuse", { n: bal.silence })
+                                : t("bal_" + bal.etat, { n: bal.messages || 0 }));
+  const ageBadge = badge(age.etat === "connue" ? "info" : "",
+                         age.etat === "connue" ? t("age_connue", { d: fmtDate(age.depuis), n: age.jours == null ? 0 : age.jours })
+                                               : t("age_inconnue"));
+
+  const signaux = c.risques || [];
+  const grave = signaux.some((r) => r.gravite === "haute");
+  const alerte = signaux.length
+    ? el("div", { class: "alerte " + (grave ? "haute" : "moyenne") },
+        el("b", { text: t(grave ? "alerte_haute" : "alerte_moyenne") }),
+        el("ul", {}, ...signaux.map((r) => el("li", {},
+          el("span", { text: t("r_" + r.code, { ...r, qui: (r.qui || []).join(", ") }) }),
+          r.texte ? el("span", { class: "quote", text: "« " + r.texte + " »" }) : null))))
+    : null;
+  const act = c.activite;
+  const contexte = act
+    ? t(signaux.length ? "activite_fenetre" : "activite_ok",
+        { salon: act.salon, h: act.fenetre_h, n: act.messages })
+    : c.verifie_le ? t("activite_rien") : "";
+  const mesure = contexte
+    ? el("div", { class: "note" }, contexte,
+        signaux.length ? null : el("span", { text: " " + t("activite_avert") }))
+    : null;
+
+  let ecrire;
+  if (c.boite) {
+    const zone = el("textarea", { class: "field", style: "min-height:70px;font-family:inherit;font-size:14px",
+                                  placeholder: t("ecrire_ph") });
+    zone.value = brouillons[c.did] || "";
+    const code = el("code", { text: commandeEcrire(c.boite, zone.value) });
+    zone.addEventListener("input", () => { brouillons[c.did] = zone.value; code.textContent = commandeEcrire(c.boite, zone.value); });
+    zone.addEventListener("blur", () => { if (carnetSale) renderCarnet(); });
+    // Sa boîte n'est ni dans tes salons ni dans tes boîtes : sans surveillance, ton envoi ne laisse aucune trace.
+    const suivie = !!(state && state.salons.some((x) => x.salon === c.boite));
+    ecrire = el("div", {}, zone,
+      el("div", { class: "cmd" }, code,
+        el("button", { class: "btn small", text: t("copier"), onclick: () => copy(code.textContent) })),
+      suivie
+        ? el("div", { class: "note", text: t("preuve_ok") })
+        : el("div", { class: "alerte moyenne" }, el("div", { text: t("preuve_non") }),
+            el("button", { class: "btn small", style: "margin-top:8px",
+                           text: t("preuve_btn"),
+                           onclick: () => saveConfig(state.dids,
+                                                     [...state.salons.map((x) => x.salon), c.boite]) })));
+  } else {
+    ecrire = el("div", { class: "note", text: t("pas_de_boite") });
+  }
+
+  return el("article", { class: "card" },
+    el("div", { class: "card-top" },
+      c.surnom ? el("span", { class: "type", text: c.surnom }) : null,
+      el("button", { class: "did", title: c.did, text: shortDid(c.did), onclick: () => copy(c.did) }),
+      c.boite ? el("span", { text: "#" + c.boite }) : null,
+      el("span", { class: "spacer" }),
+      el("span", { text: c.verifie_le ? t("verifie", { t: ago(c.verifie_le) }) : t("jamais_verifie") }),
+      el("button", { class: "x", title: t("retirer"), "aria-label": t("retirer"), text: "×",
+                     onclick: () => retirerContact(c.did) })),
+    el("div", { class: "meta", style: "margin-top:10px" }, noteBadge, balBadge, ageBadge,
+      note.url ? el("a", { class: "btn small", href: note.url, target: "_blank",
+                           rel: "noopener noreferrer nofollow", text: t("note_lien") }) : null),
+    age.etat === "connue" ? el("div", { class: "note",
+      text: t("age_source_" + age.source, { s: age.salon || "" }) + " · " + t("age_note") }) : null,
+    sursis ? el("div", { class: "note", text: t("bal_silence_note") }) : null,
+    alerte, mesure,
+    note.detail || bal.detail ? el("div", { class: "note", text: [note.detail, bal.detail].filter(Boolean).join(" · ") }) : null,
+    el("label", { class: "field-label", text: t("ecrire", { q: nom }) }),
+    ecrire);
+}
+
+function renderCarnet() {
+  const compteur = $("count-equipe");
+  compteur.textContent = carnet.length; compteur.hidden = carnet.length === 0;
+  const box = $("carnet");
+  // Ne pas reconstruire les fiches pendant que l'on tape un message dedans — mais un bouton
+  // cliqué dans une fiche garde le focus, et son effet doit s'afficher tout de suite.
+  const actif = document.activeElement;
+  if (actif && box.contains(actif) && /^(TEXTAREA|INPUT)$/.test(actif.tagName)) { carnetSale = true; return; }
+  carnetSale = false;
+  const dernier = carnet.map((c) => c.verifie_le).filter(Boolean).sort().pop();
+  $("carnet-resume").textContent = !carnet.length ? ""
+    : dernier ? t("carnet_resume", { n: carnet.length, t: ago(dernier) }) : t("carnet_jamais", { n: carnet.length });
+  if (!carnet.length) {
+    box.replaceChildren(el("div", { class: "empty" },
+      el("b", { text: t("carnet_vide") }), el("span", { text: t("carnet_vide_hint") })));
+    return;
+  }
+  box.replaceChildren(...carnet.map(fiche));
 }
 
 function renderWatch() {
@@ -606,13 +821,13 @@ function renderWatch() {
   updatePublish();
 }
 
-function renderAll() { if (state) { renderStatus(); renderWatch(); renderBoite(); } renderResults(); updatePublish(); updateProof(); }
+function renderAll() { if (state) { renderStatus(); renderWatch(); renderBoite(); } renderResults(); renderCarnet(); updatePublish(); updateProof(); }
 
 // ---------------------------------------------------------------- actions
 async function saveConfig(dids, salons, boites, errBox) {
   try {
     state = await api("/api/config", boites === undefined ? { dids, salons } : { dids, salons, boites });
-    renderWatch(); renderStatus(); renderResults(); renderBoite();
+    renderWatch(); renderStatus(); renderResults(); renderBoite(); renderCarnet();
     return true;
   } catch (e) {
     if (errBox) { errBox.textContent = e.message; errBox.classList.remove("hidden"); }
@@ -638,6 +853,32 @@ async function addBoite() {
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(b)) { err.textContent = t("boite_invalide"); err.classList.remove("hidden"); return; }
   const actuelles = (state.boites || []).map((x) => x.boite);
   if (await saveConfig(state.dids, state.salons.map((s) => s.salon), [...actuelles, b], err)) $("add-boite").value = "";
+}
+
+async function saveContacts(contacts, errBox) {
+  try {
+    carnet = (await api("/api/contacts", { contacts })).contacts || [];
+    renderCarnet();
+    return true;
+  } catch (e) {
+    if (errBox) { errBox.textContent = e.message; errBox.classList.remove("hidden"); }
+    return false;
+  }
+}
+const contactsSimples = () => carnet.map((c) => ({ did: c.did, surnom: c.surnom || "" }));
+async function addContact() {
+  const did = $("add-contact").value.trim(), surnom = $("add-surnom").value.trim(), err = $("contact-err");
+  err.classList.add("hidden");
+  const echec = (cle) => { err.textContent = t(cle); err.classList.remove("hidden"); };
+  if (!/^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$/.test(did)) return echec("contact_invalide");
+  if (carnet.some((c) => c.did === did)) return echec("contact_deja");
+  if (await saveContacts([...contactsSimples(), { did, surnom }], err)) {
+    $("add-contact").value = ""; $("add-surnom").value = "";
+  }
+}
+function retirerContact(did) {
+  delete brouillons[did];
+  return saveContacts(contactsSimples().filter((c) => c.did !== did));
 }
 
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
@@ -678,6 +919,11 @@ document.querySelectorAll(".chip[data-type]").forEach((c) => c.addEventListener(
   document.querySelectorAll(".chip[data-type]").forEach((x) => x.setAttribute("aria-pressed", x === c));
   renderResults();
 }));
+document.querySelectorAll(".chip[data-genre]").forEach((c) => c.addEventListener("click", () => {
+  filtreBoite = c.dataset.genre;
+  document.querySelectorAll(".chip[data-genre]").forEach((x) => x.setAttribute("aria-pressed", x === c));
+  renderBoite();
+}));
 $("q").addEventListener("input", renderResults);
 $("f-did").addEventListener("change", renderResults);
 $("f-salon").addEventListener("change", renderResults);
@@ -685,6 +931,9 @@ $("add-did-btn").addEventListener("click", () => addDid($("add-did").value));
 $("add-did").addEventListener("keydown", (e) => e.key === "Enter" && addDid($("add-did").value));
 $("add-room-btn").addEventListener("click", addRoom);
 $("add-boite-btn").addEventListener("click", addBoite);
+$("add-contact-btn").addEventListener("click", addContact);
+["add-contact", "add-surnom"].forEach((id) => $(id).addEventListener("keydown", (e) => e.key === "Enter" && addContact()));
+$("carnet-btn").addEventListener("click", async () => { await api("/api/carnet", {}); toast(t("job_lance")); });
 $("add-boite").addEventListener("keydown", (e) => e.key === "Enter" && addBoite());
 $("lu-btn").addEventListener("click", async () => { state = await api("/api/boite/lu", {}); lueJusqua = state ? (state.boite_lue || lueJusqua) : lueJusqua; await refresh(); renderBoite(); });
 $("add-room").addEventListener("keydown", (e) => e.key === "Enter" && addRoom());
